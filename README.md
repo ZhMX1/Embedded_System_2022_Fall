@@ -1,0 +1,5 @@
+# Embedded_System_2022_autumn
+课程大作业代码及展示文档
+具体代码请结合Libraries文件夹和User文件夹共同阅读
+
+成品展示效果请见视频。
