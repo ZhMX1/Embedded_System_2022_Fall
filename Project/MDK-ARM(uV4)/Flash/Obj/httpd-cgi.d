@@ -1,0 +1,17 @@
+.\flash\obj\httpd-cgi.o: ..\..\User\uIP\http\httpd-cgi.c
+.\flash\obj\httpd-cgi.o: ..\..\User\uIP\uip\uip.h
+.\flash\obj\httpd-cgi.o: ..\..\User\uIP\uip\uipopt.h
+.\flash\obj\httpd-cgi.o: ..\..\User\uIP\dm9000\uip-conf.h
+.\flash\obj\httpd-cgi.o: D:\Keil\ARM\ARMCC\Bin\..\include\inttypes.h
+.\flash\obj\httpd-cgi.o: D:\Keil\ARM\ARMCC\Bin\..\include\stdint.h
+.\flash\obj\httpd-cgi.o: ..\..\User\uIP\http\webserver.h
+.\flash\obj\httpd-cgi.o: ..\..\User\uIP\http\httpd.h
+.\flash\obj\httpd-cgi.o: ..\..\User\uIP\uip\psock.h
+.\flash\obj\httpd-cgi.o: ..\..\User\uIP\uip\uipopt.h
+.\flash\obj\httpd-cgi.o: ..\..\User\uIP\uip\pt.h
+.\flash\obj\httpd-cgi.o: ..\..\User\uIP\uip\lc.h
+.\flash\obj\httpd-cgi.o: ..\..\User\uIP\uip\lc-switch.h
+.\flash\obj\httpd-cgi.o: ..\..\User\uIP\http\httpd-fs.h
+.\flash\obj\httpd-cgi.o: ..\..\User\uIP\http\httpd-cgi.h
+.\flash\obj\httpd-cgi.o: D:\Keil\ARM\ARMCC\Bin\..\include\stdio.h
+.\flash\obj\httpd-cgi.o: D:\Keil\ARM\ARMCC\Bin\..\include\string.h

@@ -1,0 +1,348 @@
+L 1 "..\..\User\uIP\uip\timer.c"
+N/**
+N * \addtogroup timer
+N * @{
+N */
+N
+N/**
+N * \file
+N * Timer library implementation.
+N * \author
+N * Adam Dunkels <adam@sics.se>
+N */
+N
+N/*
+N * Copyright (c) 2004, Swedish Institute of Computer Science.
+N * All rights reserved.
+N *
+N * Redistribution and use in source and binary forms, with or without
+N * modification, are permitted provided that the following conditions
+N * are met:
+N * 1. Redistributions of source code must retain the above copyright
+N *    notice, this list of conditions and the following disclaimer.
+N * 2. Redistributions in binary form must reproduce the above copyright
+N *    notice, this list of conditions and the following disclaimer in the
+N *    documentation and/or other materials provided with the distribution.
+N * 3. Neither the name of the Institute nor the names of its contributors
+N *    may be used to endorse or promote products derived from this software
+N *    without specific prior written permission.
+N *
+N * THIS SOFTWARE IS PROVIDED BY THE INSTITUTE AND CONTRIBUTORS ``AS IS'' AND
+N * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+N * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+N * ARE DISCLAIMED.  IN NO EVENT SHALL THE INSTITUTE OR CONTRIBUTORS BE LIABLE
+N * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+N * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+N * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+N * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+N * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+N * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+N * SUCH DAMAGE.
+N *
+N * This file is part of the uIP TCP/IP stack
+N *
+N * Author: Adam Dunkels <adam@sics.se>
+N *
+N * $Id: timer.c,v 1.2 2006/06/12 08:00:30 adam Exp $
+N */
+N
+N#include "clock.h"
+L 1 "..\..\User\uIP\uip\clock.h" 1
+N/**
+N * \defgroup clock Clock interface
+N *
+N * The clock interface is the interface between the \ref timer "timer library"
+N * and the platform specific clock functionality. The clock
+N * interface must be implemented for each platform that uses the \ref
+N * timer "timer library".
+N *
+N * The clock interface does only one this: it measures time. The clock
+N * interface provides a macro, CLOCK_SECOND, which corresponds to one
+N * second of system time.
+N *
+N * \sa \ref timer "Timer library"
+N *
+N * @{
+N */
+N
+N/*
+N * Copyright (c) 2004, Swedish Institute of Computer Science.
+N * All rights reserved.
+N *
+N * Redistribution and use in source and binary forms, with or without
+N * modification, are permitted provided that the following conditions
+N * are met:
+N * 1. Redistributions of source code must retain the above copyright
+N *    notice, this list of conditions and the following disclaimer.
+N * 2. Redistributions in binary form must reproduce the above copyright
+N *    notice, this list of conditions and the following disclaimer in the
+N *    documentation and/or other materials provided with the distribution.
+N * 3. Neither the name of the Institute nor the names of its contributors
+N *    may be used to endorse or promote products derived from this software
+N *    without specific prior written permission.
+N *
+N * THIS SOFTWARE IS PROVIDED BY THE INSTITUTE AND CONTRIBUTORS ``AS IS'' AND
+N * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+N * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+N * ARE DISCLAIMED.  IN NO EVENT SHALL THE INSTITUTE OR CONTRIBUTORS BE LIABLE
+N * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+N * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+N * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+N * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+N * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+N * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+N * SUCH DAMAGE.
+N *
+N * This file is part of the uIP TCP/IP stack
+N *
+N * Author: Adam Dunkels <adam@sics.se>
+N *
+N * $Id: clock.h,v 1.3 2006/06/11 21:46:39 adam Exp $
+N */
+N#ifndef __CLOCK_H__
+N#define __CLOCK_H__
+N
+N#include "clock-arch.h"
+L 1 "..\..\User\uIP\dm9000\clock-arch.h" 1
+N/*
+N * Copyright (c) 2006, Swedish Institute of Computer Science.
+N * All rights reserved.
+N *
+N * Redistribution and use in source and binary forms, with or without
+N * modification, are permitted provided that the following conditions
+N * are met:
+N * 1. Redistributions of source code must retain the above copyright
+N *    notice, this list of conditions and the following disclaimer.
+N * 2. Redistributions in binary form must reproduce the above copyright
+N *    notice, this list of conditions and the following disclaimer in the
+N *    documentation and/or other materials provided with the distribution.
+N * 3. Neither the name of the Institute nor the names of its contributors
+N *    may be used to endorse or promote products derived from this software
+N *    without specific prior written permission.
+N *
+N * THIS SOFTWARE IS PROVIDED BY THE INSTITUTE AND CONTRIBUTORS ``AS IS'' AND
+N * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+N * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+N * ARE DISCLAIMED.  IN NO EVENT SHALL THE INSTITUTE OR CONTRIBUTORS BE LIABLE
+N * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+N * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+N * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+N * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+N * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+N * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+N * SUCH DAMAGE.
+N *
+N * This file is part of the uIP TCP/IP stack
+N *
+N * $Id: clock-arch.h,v 1.2 2006/06/12 08:00:31 adam Exp $
+N */
+N
+N#ifndef __CLOCK_ARCH_H__
+N#define __CLOCK_ARCH_H__
+N
+Ntypedef int clock_time_t;
+N#define CLOCK_CONF_SECOND 100
+N
+N#endif /* __CLOCK_ARCH_H__ */
+L 56 "..\..\User\uIP\uip\clock.h" 2
+N
+N/**
+N * Initialize the clock library.
+N *
+N * This function initializes the clock library and should be called
+N * from the main() function of the system.
+N *
+N */
+Nvoid clock_init(void);
+N
+N/**
+N * Get the current clock time.
+N *
+N * This function returns the current system clock time.
+N *
+N * \return The current clock time, measured in system ticks.
+N */
+Nclock_time_t clock_time(void);
+N
+N/**
+N * A second, measured in system clock time.
+N *
+N * \hideinitializer
+N */
+N#ifdef CLOCK_CONF_SECOND
+N#define CLOCK_SECOND CLOCK_CONF_SECOND
+N#else
+S#define CLOCK_SECOND (clock_time_t)100
+N#endif
+N
+N#endif /* __CLOCK_H__ */
+N
+N/** @} */
+L 49 "..\..\User\uIP\uip\timer.c" 2
+N#include "timer.h"
+L 1 "..\..\User\uIP\uip\timer.h" 1
+N/**
+N * \defgroup timer Timer library
+N *
+N * The timer library provides functions for setting, resetting and
+N * restarting timers, and for checking if a timer has expired. An
+N * application must "manually" check if its timers have expired; this
+N * is not done automatically.
+N *
+N * A timer is declared as a \c struct \c timer and all access to the
+N * timer is made by a pointer to the declared timer.
+N *
+N * \note The timer library uses the \ref clock "Clock library" to
+N * measure time. Intervals should be specified in the format used by
+N * the clock library.
+N *
+N * @{
+N */
+N
+N
+N/**
+N * \file
+N * Timer library header file.
+N * \author
+N * Adam Dunkels <adam@sics.se>
+N */
+N
+N/*
+N * Copyright (c) 2004, Swedish Institute of Computer Science.
+N * All rights reserved.
+N *
+N * Redistribution and use in source and binary forms, with or without
+N * modification, are permitted provided that the following conditions
+N * are met:
+N * 1. Redistributions of source code must retain the above copyright
+N *    notice, this list of conditions and the following disclaimer.
+N * 2. Redistributions in binary form must reproduce the above copyright
+N *    notice, this list of conditions and the following disclaimer in the
+N *    documentation and/or other materials provided with the distribution.
+N * 3. Neither the name of the Institute nor the names of its contributors
+N *    may be used to endorse or promote products derived from this software
+N *    without specific prior written permission.
+N *
+N * THIS SOFTWARE IS PROVIDED BY THE INSTITUTE AND CONTRIBUTORS ``AS IS'' AND
+N * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+N * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+N * ARE DISCLAIMED.  IN NO EVENT SHALL THE INSTITUTE OR CONTRIBUTORS BE LIABLE
+N * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+N * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+N * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+N * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+N * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+N * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+N * SUCH DAMAGE.
+N *
+N * This file is part of the uIP TCP/IP stack
+N *
+N * Author: Adam Dunkels <adam@sics.se>
+N *
+N * $Id: timer.h,v 1.3 2006/06/11 21:46:39 adam Exp $
+N */
+N#ifndef __TIMER_H__
+N#define __TIMER_H__
+N
+N#include "clock.h"
+N
+N/**
+N * A timer.
+N *
+N * This structure is used for declaring a timer. The timer must be set
+N * with timer_set() before it can be used.
+N *
+N * \hideinitializer
+N */
+Nstruct timer {
+N  clock_time_t start;
+N  clock_time_t interval;
+N};
+N
+Nvoid timer_set(struct timer *t, clock_time_t interval);
+Nvoid timer_reset(struct timer *t);
+Nvoid timer_restart(struct timer *t);
+Nint timer_expired(struct timer *t);
+N
+N#endif /* __TIMER_H__ */
+N
+N/** @} */
+L 50 "..\..\User\uIP\uip\timer.c" 2
+N
+N/*---------------------------------------------------------------------------*/
+N/**
+N * Set a timer.
+N *
+N * This function is used to set a timer for a time sometime in the
+N * future. The function timer_expired() will evaluate to true after
+N * the timer has expired.
+N *
+N * \param t A pointer to the timer
+N * \param interval The interval before the timer expires.
+N *
+N */
+Nvoid
+Ntimer_set(struct timer *t, clock_time_t interval)
+N{
+N  t->interval = interval;
+N  t->start = clock_time();
+N}
+N/*---------------------------------------------------------------------------*/
+N/**
+N * Reset the timer with the same interval.
+N *
+N * This function resets the timer with the same interval that was
+N * given to the timer_set() function. The start point of the interval
+N * is the exact time that the timer last expired. Therefore, this
+N * function will cause the timer to be stable over time, unlike the
+N * timer_rester() function.
+N *
+N * \param t A pointer to the timer.
+N *
+N * \sa timer_restart()
+N */
+Nvoid
+Ntimer_reset(struct timer *t)
+N{
+N  t->start += t->interval;
+N}
+N/*---------------------------------------------------------------------------*/
+N/**
+N * Restart the timer from the current point in time
+N *
+N * This function restarts a timer with the same interval that was
+N * given to the timer_set() function. The timer will start at the
+N * current time.
+N *
+N * \note A periodic timer will drift if this function is used to reset
+N * it. For preioric timers, use the timer_reset() function instead.
+N *
+N * \param t A pointer to the timer.
+N *
+N * \sa timer_reset()
+N */
+Nvoid
+Ntimer_restart(struct timer *t)
+N{
+N  t->start = clock_time();
+N}
+N/*---------------------------------------------------------------------------*/
+N/**
+N * Check if a timer has expired.
+N *
+N * This function tests if a timer has expired and returns true or
+N * false depending on its status.
+N *
+N * \param t A pointer to the timer
+N *
+N * \return Non-zero if the timer has expired, zero otherwise.
+N *
+N */
+Nint
+Ntimer_expired(struct timer *t)
+N{
+N  return (clock_time_t)(clock_time() - t->start) >= (clock_time_t)t->interval;
+N}
+N/*---------------------------------------------------------------------------*/
+N
+N/** @} */

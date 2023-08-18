@@ -1,0 +1,5 @@
+main() 函数路径:  User\App\Src\main.c
+
+KEIL工程文件路径: Project\MDK-ARM(uV4)\project.uvproj
+
+IAR工程文件路径:  Project\EWARMv6\project.eww

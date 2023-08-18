@@ -1,0 +1,319 @@
+/*
+*********************************************************************************************************
+*
+*	                          【安富莱】STM32-V4 开发板-例程修改记录
+*
+*********************************************************************************************************
+*/
+
+2016-02-01 V1.0h
+1. 增加4.3寸电容触摸屏驱动, 添加文件： bsp_ts_ft5x06.c
+
+2015-09-29 V1.0g
+1. bsp.c注释错误， 启动代码写的是F4的。
+2. 修改bsp多个文件的注释。
+3. bsp_uart_fifo.c 初始化NVIC时，没有配置主优先级。删除V5移植过来时的USART6_EN的宏。
+4. bsp_uart_fifo.c, 修改设置波特率的函数，不影响其他配置。
+	新增函数 USART_SetBaudRate
+5. 修改了Modbus, wifi_test中和波特率相关的代码。
+
+2015-09-27 V1.0f
+1. Project下面添加si文件夹，用于存放 Source Insight 的工程文件。
+2. 修改 bsp_touch.c, 解决TSC2046触摸的bug （3.5寸），判断坐标有效的函数仅针对RA8875。
+
+2015-09-23 V1.0f
+1. bsp_tm7705.c 文件有BUG， DRDY和RESET口线的GPIO定义错误。已修正。
+
+2015-08-12 V1.0d
+1. 增加CAN网络测试。可以互相控制对方的LED和蜂鸣器。
+2. IAR工程调试OK。
+3. 硬件信息界面增加CPU内部RTC时钟显示功能
+
+2015-08-05 V1.0c
+1. 修改 bsp_key.c ，区分K1，K2，K3独立按键和K1K2组合键
+2. bsp_ir_decorde.c 去掉调试语句 bsp_ToggleLed(1);
+3. 修正竖屏模式截屏保存截图的bug
+4. 大规模增加堆栈空间。将app应用程序中的全局变量全部变为局部变量，共享堆栈空间. startup_stm32f10x_hd.s
+5. stm32f10x_it.c 中异常中断取消串口打印，改为驱动蜂鸣器鸣叫（便于及时发现内存访问异常）
+6. diskio，写文件时，增加文件时钟。添加了 bsp_cpu_rtc.c 模块。
+7. 示波器界面增加AD9833输出波形。
+8. MP3界面，有时候会进入异常。进入示波器，然后在进入MP3界面死机。原因：
+
+
+2015-08-02  V1.0b
+1. 升级固件库
+  * @version V3.6.1
+  * @date    05-March-2012
+2. 升级 bsp_sdio_sd.c ； 涉及虚拟U盘中的 mass_mall.c文件和FatFS中的disk_io.c
+
+2015-07-15
+1. 弃用 RDA5807M 芯片，还是用si4704
+2. 修改GPRS测试界面，增加拨打 10010 ， 10086，接听被叫 按钮。
+
+2015-07-12
+1. 红外遥控问题。原因是STM32F103的TIM3_CH3 无法设置双边沿捕获，需要在中断中切换极性。
+2. 蜂鸣器按键音响几次后就停止了。PA8/TIM1_CH1 能够正常输出几次，后来就无法输出PWM了。
+	/* Time base configuration */
+	TIM_TimeBaseStructure.TIM_Period = usPeriod;
+	TIM_TimeBaseStructure.TIM_Prescaler = usPrescaler;
+	TIM_TimeBaseStructure.TIM_ClockDivision = 0;
+	TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
+	TIM_TimeBaseStructure.TIM_RepetitionCounter = 0;		// 少写这句话
+	TIM_TimeBaseInit(TIMx, &TIM_TimeBaseStructure);
+	
+	----
+	
+	TIM_OCStructInit(&TIM_OCInitStructure);		/* 初始化结构体成员 */
+	
+3. SPI总线冲突问题。 原因是使能DAC输出时，有个变量未初始化。同时解决示波器程序无法输出正弦波的问题。
+   	/* DAC channel1 Configuration */
+	{
+		DAC_InitTypeDef DAC_InitStructure;
+
+//		DAC_StructInit(&DAC_InitStructure);
+//		RCC_APB1PeriphClockCmd(RCC_APB1Periph_DAC, ENABLE);
+
+		DAC_InitStructure.DAC_Trigger = DAC_Trigger_T6_TRGO;
+		//DAC_InitStructure.DAC_Trigger = DAC_Trigger_T2_TRGO;
+		DAC_InitStructure.DAC_WaveGeneration = DAC_WaveGeneration_None;
+		DAC_InitStructure.DAC_LFSRUnmask_TriangleAmplitude = DAC_LFSRUnmask_Bit0;
+		DAC_InitStructure.DAC_OutputBuffer = DAC_OutputBuffer_Disable;
+		DAC_Init(DAC_Channel_1, &DAC_InitStructure);
+	}
+
+2015-07-06
+1. VS1053B芯片。硬件spi方式时，切换配置时，需要DISABLE 再ENABLE
+		SPI_Cmd(SPI1, DISABLE);			/* 禁止SPI  */
+		SPI_Cmd(SPI1, ENABLE);			/* 使能SPI  */
+2. 读写字库完毕后，清触摸缓冲区。避免重复写入
+
+
+2015-07-05
+1. SPI总线问题。软件SPI时，串行FLASH, MP3 不能正常工作。
+   原因: 串行FLASH， MP3, 图库芯片初始化时配置了硬件SPI。
+
+2015-07-03
+1. 软件SPI时，执行到串行FLASH死机。原因是 PA6/MISO 错误定义为PA7
+
+2015-06-28
+1. CH376 访问异常。原因： 12M晶振，错误焊接为24M
+2. CH376 不支持长文件名，图片文件改名为 8.3格式
+3. 显示图片时，颜色不正常。
+
+2015-06-26
+1. 现象: DAC不能输出正弦波形。	屏蔽掉 bsp_InitHMC5883L(); 解决问题。原因未知		
+	InitWaveMaker();
+	while(1);	
+
+2015-06-13
+1. 修改OLED地址。 0x6C20 0000.   FSMC_A0接的RS
+
+2015-05-31
+1. 现象: SD卡功能异常  原因: bsp_uart_fifo.c 中使能了 UART4 和 UART5 。这个和SDIO是复用。
+2. 现象: 软件检测K1键(TAMPER)一直按下。 原因: GPIO时钟未开 	RCC_APB1PeriphClockCmd(RCC_ALL_KEY, ENABLE);
+	错误地写成了 	RCC_APB1PeriphClockCmd(RCC_ALL_KEY, ENABLE);
+	
+3. 现象，MP3 进入异常中断。
+	static void FillSongList(void);  添加长文件名缓冲区定义，否则可能异常。
+		FileInf.lfname = lfname;
+		FileInf.lfsize = 256;	
+
+4. 现象， MP3 播放无声音，进度条很快，控制不正常。
+	原因：读到的文件内容全部为00。 后来读文件解决。
+	
+	问题延续：进度条很快，DREQ一直是高电平。外接MP3模块正常，怀疑硬件问题
+	
+5. MEMS传感器界面。温度传感器栏，显示乱码。返回后，12点阵也乱码了。复位后才正常。
+	原因: DS18B20初始化后会异常
+
+6. AD7705 模块，上电后正常，退出一次后再进入就异常。 void bsp_InitTM7705(void)
+		/* 复位之后, 时钟寄存器应该是 0x05 再进入时 08*/
+	{
+		uint8_t reg;
+		
+		reg = TM7705_ReadReg(REG_CLOCK);
+		if ((reg == 0x05) || (reg == 0x08))
+		{
+			g_TM7705_OK = 1;
+		}
+		else
+		{
+			g_TM7705_OK = 0;
+		}
+	}
+
+
+=============================================================================================
+
+2015-05-08 V1.3f
+1. 解决TIM8不能输出PWM波形的问题。bsp_tim_pwm.c 文件 bsp_SetTIMOutPWM()函数
+	if ((TIMx == TIM1) || (TIMx == TIM8))
+	{
+		TIM_CtrlPWMOutputs(TIM8, ENABLE);   需要更改为 ====> TIM_CtrlPWMOutputs(TIMx, ENABLE); 
+	}
+2. bsp_tft_lcd.c 更新
+	(1) 添加RA885 ASCII字体的宽度表。LCD_DispStrEx() 函数可以支持RA8875 ASCII变长宽度计算。
+	(2) 添加 LCD_HardReset(）函数，支持LCD复位由GPIO控制的产品。STM32-V5 不需要GPIO控制。
+
+2015-04-22 V1.3e
+1. LCD_RA8875.c 针对7寸屏，降低 PLL速度，解决图片刷新麻点问题。PLL 由 81.25M降低为 71M.
+2. 硬件定时器使用 ITM5预计存在BUG。 下个版本再处理。<==== 未解决
+
+2015-03-22 V1.3d
+1. bsp_spi_bus.c 初始化GPIO时钟时，GPIO时钟没有开启。
+
+2014-11-22 V1.3b
+1. NAND FLASH增加 H27U4G8F2DTR 型号。 修改hard_test.c 文件盒 usbd_msc_test.c
+2. 增加 MAG3110 的识别代码 === 
+ 注意 bsp_i2c-gpio.c 中sendbyte 函数需要修改回去
+	
+2014-11-10 V1.3a
+1. 解决"RS485通信"问题。原因:
+    bsp_Timer.c 中硬件定时器切换到TIM5- 32位后，没有开启RCC时钟。导致无法显示RS485显示器的应答。
+
+2014-11-10 V1.3
+1. 解决共享SPI总线软件模式的BUG。被RA8875 Flash重新初始化为硬件模式了。
+2. 主界面增加一个图标,DAC8501， DAC8562。可以测试双路DAC模块。
+3. 增加若干个预留的图标。实现滑动切换图片页面。仅仅4.3寸屏（480*272）和3.5寸屏（480*320)
+	才会有2个图标页面。5.0寸和7.0寸(800*480)分辨率较大，所有图标可以放在一页。
+4. C优化级别调整为最高。发现AD7606和ADS1256测试界面中一个Label控件的长度未赋初值，导致程序异常。
+   这个问题在C优化级别为0时不存在。
+5. 触摸屏测试界面。解决遥控器+键无法显示的BUG。
+
+2014-11-04 V1.2
+1. 由于支持3.5寸屏，需要在定时中断中读取触摸芯片TSC2046, 因此需要考虑SPI总线的共享和冲突问题。
+   增加 bso_spi_bus.c 文件。将 SPI总线（SCK, MOSI, MISO)的配置、收发字节的函数整合在一起。
+   支持软件SPI和硬件SPI（通过bsp_spi_bus.h 中的宏定义切换）
+2. 完善 TM7705的驱动。添加无等待的轮询函数，方便主程序快速处理。
+   AD7705模块测试界面，提高ADC刷新速度。
+3. 增加RS485数码管测试界面。
+4. 录音机界面中，去掉LED1指示灯的控制，因为LED1指示灯的GPIO将用于3.5寸显示屏的触摸芯片。
+
+2014-10-20 V1.1
+1. 触摸屏测试界面中解决4.3寸屏，浏览NAND Flash图片报错问题。原因是NAND Flash
+   中复制的4.3寸文件长度不正确。
+2. bsp_spi_flash.c 和  bsp_ra8875_flash.c 中初始化SPI的GPIO速度由50MHz修改
+	为25MHz，提高长线传输时的稳定性。解决接上部分显示模块时，串行Flash访问异常的问题。
+
+2014-10-13 V1.0
+1. 修改数字小键盘程序 num_pad.c
+2. 增加铁框增强屏（W25Q128图库芯片）
+3. 触摸屏测试界面中增加按K1键显示RA8875图库芯片内图片、NOR图片、NAND图片。
+4. NOR Flash数据更新；NAND Flash数据更新；RA8875图库芯片数据更新
+5. LCD_RA8875.c 背光控制函数，PWM频率修改为 36.62KHz，避免音频噪声。
+6. 主界面增加无触摸板 烧写字库功能(支持按键操作)
+7. 完善收音机界面，支持Si4704; 完善音量调节功能(可最大和关闭); 修改微调频率范围到64-108M
+8. 增加上电自检程序，打印到串口。
+9. FatFS由R0.09b升级到R0.10b版本。
+10. LCD驱动支持横屏、旋转90°、180°、270°。 在主界面下按摇杆的OK键可以切换方向。
+	（备注： 由于NOR Flash和RA8875图库中的图片文件是按横屏设计的，因此不支持图片旋转，
+		也就是说，在触摸界面，切换图片会显示错乱）
+
+2014-02-19 V0.7
+   a) STM32F4固件库升级到最新 V1.3.0  (功能配置已更改)
+   b) LwIP版本由V1.3.2升级到V1.4.1
+   a) WEB服务器界面 LwIP支持动态修改IP地址。
+   b) "触摸屏和按键" 界面中增加PS/2键盘鼠标、红外遥控器功能、显示RA8875外挂图库芯
+      片中的图片
+   c) 增加"AD7705模块"测试界面 --- 双通道16位ADC
+   d) 增加"ADS1256模块"测试界面 --- 8通道24位ADC
+   e) "RA8875字库"界面
+       - 增加写图库芯片功能 (图片放到NAND Flash磁盘 \RA8875文件夹)
+       - 提高写NOR Flash的速度
+   f) NAND Flash\RA8875文件夹增加BmpWrite.bin文件，这是写入到RA8875图库芯片的文件.
+   g) "MEMS传感器"界面，增加DS18B20和DHT11测试功能
+
+----------------------------------------------------------------------------------------------------------------
+V0.64  2014-01-30
+1. param.h 中 结构成员 net_gate 更名为 gateway
+2. web server 测试程序中， LWIP 支持重设网络参数.
+3. 提高写NOR Flash数据的速度。
+4. 触摸测试界面，增加显示RA8875外挂图库芯片中的图片
+5. LCD_RA8875.c 驱动升级，增加显示图库芯片中的图片的函数
+6. 增加 AD7705模块和 ADS1256模块测试界面
+7. MEMS 传感器，增加 DS18B20温度传感器
+8. GPS测试界面，增加硬件状态指示（是否连接GPS模块）
+
+----------------------------------------------------------------------------------------------------------------
+V0.63  2013-09-24
+1. 修改主界面,增加图片背景。可以在单色背景和图片背景之间切换。图片数据存放在NOR Flash。
+2. 修改 bsp 文件夹。将 LCD_RA8875.c 文件中MCU接口独立出来为 bsp_ra8875_port.c
+3. 修正 bsp_IsLedOn() 函数的BUG。返回值逻辑反了。
+4. IAR工程调试通过。原因。USBH和USBD 文件夹下有2个usb_conf.h, 其中1个改名即可。
+	IAR 工程编译错误: (下面2个问题还没解决)
+
+	Error[Li005]: no definition for "USBD_OTG_EP1IN_ISR_Handler"
+	[referenced from E:\MyData\STM32-F4-A\软件\src\F4-999_STM32-V5出厂测试程序\Project\EWARMv6\Flash\Obj\usb_it.o]
+
+	Error[Li005]: no definition for "USBD_OTG_EP1OUT_ISR_Handler"
+	 [referenced from E:\MyData\STM32-F4-A\软件\src\F4-999_STM32-V5出厂测试程序\Project\EWARMv6\Flash\Obj\usb_it.o]
+
+----------------------------------------------------------------------------------------------------------------
+V0.62  2013-07-16
+1. 增加VS1053B MP3模块的测试界面
+
+----------------------------------------------------------------------------------------------------------------
+V0.61  2013-07-19
+1. 将字库搬移到NOR Flash, 在RA8875界面增加写NOR Flash的功能
+2. 增加MP3模块测试程序，自动播放NAND Flash,Music下的歌曲
+
+----------------------------------------------------------------------------------------------------------------
+V0.60  2013-07-06
+1. 增加显示带Alpha通道的32位深度图标函数。
+
+----------------------------------------------------------------------------------------------------------------
+V0.58  2013-06-28
+1.增加RA8875字库和图库芯片操作功能
+2.修改 LCD_RA8875.c 文件
+3.增加 bmp_file.c /h 文件，实现保存截屏功能
+4.修改 bsp_key.c 函数, 启用第2个读指针, 实现 bsp_Idle() 函数中识别系统功能键（截屏键： K1 + K2组合）
+
+----------------------------------------------------------------------------------------------------------------
+V0.57  2013-06-25
+1. 收音机界面，AM状态，显示CAP，调谐电容值
+
+----------------------------------------------------------------------------------------------------------------
+V0.56  2013-06-21
+1. 规范bsp文件夹下的所有文件。整理注释和版本标注。取消CPU_IDLE() 宏，直接用 bsp_Idle() 函数替代。
+
+
+
+*********** 下面内容暂存 *****************************************************************************************
+
+1. LwIP 和 uip 存在重名函数 htons
+   将 lwIP 中的 inet.c 函数htons更名为 lw_htons
+   u16_t
+lw_htons(u16_t n)
+{
+  return ((n & 0xff) << 8) | ((n & 0xff00) >> 8);
+}
+
+2. httpd.c 文件重名。 将 LwIP 下的更名。
+
+3. netconf.c 中 include "main.h" 改为 "main_lwip.h"
+还有
+	httpd_cg_ssi.c 也改
+	httpd_w. c
+
+
+4. lwIP 初始化，如果不插网线，程序死循环在初始化内部，需要改造。
+
+死机的函数：
+uint32_t ETH_Init(ETH_InitTypeDef* ETH_InitStruct, uint16_t PHYAddress)
+ 。。。
+     /* We wait for linked status... */
+    do
+    {
+      timeout++;
+    } while (!(ETH_ReadPHYRegister(PHYAddress, PHY_BSR) & PHY_Linked_Status) && (timeout < PHY_READ_TO));
+
+更改: 宏 PHY_READ_TO 的值改小一点。
+在 stm32f4x7_eth.h 文件：
+	#define PHY_READ_TO                     ((uint32_t)0x0004FFFF)
+	#define PHY_WRITE_TO                    ((uint32_t)0x0004FFFF)
+
+5. void ETH_BSP_Config(void) 函数末尾配置了systick 为10ms。 这个地方是不需要的。因此删除。
+
+void ETH_BSP_Config(void) 需要修改为带返回值，便于处理异常。
+
+6. httpd_cg_ssi.c  中更改点亮LED的代码。

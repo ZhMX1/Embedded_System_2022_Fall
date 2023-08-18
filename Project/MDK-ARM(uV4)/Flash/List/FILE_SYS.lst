@@ -1,0 +1,1989 @@
+L 1 "..\..\User\CH376\src\FILE_SYS.C"
+N/* CH376芯片 文件系统层 V1.1 */
+N/* 提供文件系统常用子程序,提供命令打包 */
+N/* 不使用的子程序可以注释掉,从而节约单片机的程序ROM空间和数据RAM空间 */
+N/* 这里的子程序是通过括号中的变量传递参数,如果参数较多,为了节约RAM,也可以参考CH375子程序库改成通过同一全局变量/联合结构CH376_CMD_DATA传递 */
+N
+N/* name 参数是指短文件名, 可以包括根目录符, 但不含有路径分隔符, 总长度不超过1+8+1+3+1字节 */
+N/* PathName 参数是指全路径的短文件名, 包括根目录符、多级子目录及路径分隔符、文件名/目录名 */
+N/* LongName 参数是指长文件名, 以UNICODE小端顺序编码, 以两个0字节结束, 使用长文件名子程序必须先定义全局缓冲区GlobalBuf, 长度不小于64字节, 可以与其它子程序共用 */
+N
+N/* 定义 NO_DEFAULT_CH376_INT 用于禁止默认的Wait376Interrupt子程序,禁止后,应用程序必须自行定义一个同名子程序 */
+N/* 定义 DEF_INT_TIMEOUT 用于设置默认的Wait376Interrupt子程序中的等待中断的超时时间/循环计数值, 0则不检查超时而一直等待 */
+N/* 定义 EN_DIR_CREATE 用于提供新建多级子目录的子程序,默认是不提供 */
+N/* 定义 EN_DISK_QUERY 用于提供磁盘容量查询和剩余空间查询的子程序,默认是不提供 */
+N/* 定义 EN_SECTOR_ACCESS 用于提供以扇区为单位读写文件的子程序,默认是不提供 */
+N/* 定义 EN_LONG_NAME 用于提供支持长文件名的子程序,默认是不提供 */
+N
+N#include	"FILE_SYS.H"
+L 1 "..\..\User\CH376\inc\FILE_SYS.H" 1
+N/* CH376芯片 文件系统层 V1.0 */
+N/* 提供文件系统常用子程序,提供命令打包 */
+N/* 不使用的子程序可以注释掉,从而节约单片机的程序ROM空间和数据RAM空间 */
+N/* 这里的子程序是通过括号中的变量传递参数,如果参数较多,为了节约RAM,也可以参考CH375子程序库改成通过同一全局变量/联合结构CH376_CMD_DATA传递 */
+N
+N/* name 参数是指短文件名, 可以包括根目录符, 但不含有路径分隔符, 总长度不超过1+8+1+3+1字节 */
+N/* PathName 参数是指全路径的短文件名, 包括根目录符、多级子目录及路径分隔符、文件名/目录名 */
+N/* LongName 参数是指长文件名, 以UNICODE小端顺序编码, 以两个0字节结束, 使用长文件名子程序必须先定义全局缓冲区GlobalBuf, 长度不小于64字节, 可以与其它子程序共用 */
+N
+N/* 定义 NO_DEFAULT_CH376_INT 用于禁止默认的Wait376Interrupt子程序,禁止后,应用程序必须自行定义一个同名子程序 */
+N/* 定义 DEF_INT_TIMEOUT 用于设置默认的Wait376Interrupt子程序中的等待中断的超时时间/循环计数值, 0则不检查超时而一直等待 */
+N/* 定义 EN_DIR_CREATE 用于提供新建多级子目录的子程序,默认是不提供 */
+N/* 定义 EN_DISK_QUERY 用于提供磁盘容量查询和剩余空间查询的子程序,默认是不提供 */
+N/* 定义 EN_SECTOR_ACCESS 用于提供以扇区为单位读写文件的子程序,默认是不提供 */
+N/* 定义 EN_LONG_NAME 用于提供支持长文件名的子程序,默认是不提供 */
+N
+N#ifndef	__CH376_FS_H__
+N#define __CH376_FS_H__
+N
+N#include	"HAL.H"
+L 1 "..\..\User\CH376\inc\HAL.H" 1
+N/* CH376芯片 硬件抽象层 V1.0 */
+N/* 提供I/O接口子程序 */
+N
+N#include	"CH376INC.H"
+L 1 "..\..\User\CH376\inc\CH376INC.H" 1
+N/* C Define for CH376        */
+N/* Website:  http://wch.cn   */
+N/* Email:    tech@wch.cn     */
+N/* Author:   W.ch 2008.10    */
+N/* V1.0 for CH376            */
+N
+N#ifndef __CH376INC_H__
+N#define __CH376INC_H__
+N
+N#ifdef __cplusplus
+Sextern "C" {
+N#endif
+N
+N/* ********************************************************************************************************************* */
+N/* 常用类型和常量定义 */
+N
+N#ifndef		TRUE
+N#define		TRUE	1
+N#define		FALSE	0
+N#endif
+N#ifndef		NULL
+N#define		NULL	0
+N#endif
+N
+N#ifndef UINT8
+Ntypedef unsigned char                UINT8;
+N#endif
+N#ifndef UINT16
+Ntypedef unsigned short               UINT16;
+N#endif
+N#ifndef UINT32
+Ntypedef unsigned long                UINT32;
+N#endif
+N#ifndef PUINT8
+Ntypedef unsigned char               *PUINT8;
+N#endif
+N#ifndef PUINT16
+Ntypedef unsigned short              *PUINT16;
+N#endif
+N#ifndef PUINT32
+Ntypedef unsigned long               *PUINT32;
+N#endif
+N#ifndef UINT8V
+Ntypedef unsigned char volatile       UINT8V;
+N#endif
+N#ifndef PUINT8V
+Ntypedef unsigned char volatile      *PUINT8V;
+N#endif
+N
+N/* ********************************************************************************************************************* */
+N/* 硬件特性 */
+N
+N#define	CH376_DAT_BLOCK_LEN	0x40			/* USB单个数据包, 数据块的最大长度, 默认缓冲区的长度 */
+N
+N/* ********************************************************************************************************************* */
+N/* 命令代码 */
+N/* 部分命令兼容CH375芯片, 但是输入数据或者输出数据的可能局部不同) */
+N/* 一个命令操作顺序包含:
+N          一个命令码(对于串口方式,命令码之前还需要两个同步码),
+N          若干个输入数据(可以是0个),
+N          产生中断通知 或者 若干个输出数据(可以是0个), 二选一, 有中断通知则一定没有输出数据, 有输出数据则一定不产生中断
+N       仅CMD01_WR_REQ_DATA命令例外, 顺序包含: 一个命令码, 一个输出数据, 若干个输入数据
+N   命令码起名规则: CMDxy_NAME
+N       其中的x和y都是数字, x说明最少输入数据个数(字节数), y说明最少输出数据个数(字节数), y如果是H则说明产生中断通知,
+N       有些命令能够实现0到多个字节的数据块读写, 数据块本身的字节数未包含在上述x或y之内 */
+N/* 本文件默认会同时提供与CH375芯片命令码兼容的命令码格式（即去掉x和y之后), 如果不需要, 那么可以定义_NO_CH375_COMPATIBLE_禁止 */
+N
+N/* ********************************************************************************************************************* */
+N/* 主要命令(手册一), 常用 */
+N
+N#define	CMD01_GET_IC_VER	0x01			/* 获取芯片及固件版本 */
+N/* 输出: 版本号( 位7为0, 位6为1, 位5~位0为版本号 ) */
+N/*           CH376返回版本号的值为041H即版本号为01H */
+N
+N#define	CMD21_SET_BAUDRATE	0x02			/* 串口方式: 设置串口通讯波特率(上电或者复位后的默认波特率为9600bps,由D4/D5/D6引脚选择) */
+N/* 输入: 波特率分频系数, 波特率分频常数 */
+N/* 输出: 操作状态( CMD_RET_SUCCESS或CMD_RET_ABORT, 其它值说明操作未完成 ) */
+N
+N#define	CMD00_ENTER_SLEEP	0x03			/* 进入睡眠状态 */
+N
+N#define	CMD00_RESET_ALL		0x05			/* 执行硬件复位 */
+N
+N#define	CMD11_CHECK_EXIST	0x06			/* 测试通讯接口和工作状态 */
+N/* 输入: 任意数据 */
+N/* 输出: 输入数据的按位取反 */
+N
+N#define	CMD20_CHK_SUSPEND	0x0B			/* 设备方式: 设置检查USB总线挂起状态的方式 */
+N/* 输入: 数据10H, 检查方式 */
+N/*           00H=不检查USB挂起, 04H=以50mS为间隔检查USB挂起, 05H=以10mS为间隔检查USB挂起 */
+N
+N#define	CMD20_SET_SDO_INT	0x0B			/* SPI接口方式: 设置SPI的SDO引脚的中断方式 */
+N/* 输入: 数据16H, 中断方式 */
+N/*           10H=禁止SDO引脚用于中断输出,在SCS片选无效时三态输出禁止, 90H=SDO引脚在SCS片选无效时兼做中断请求输出 */
+N
+N#define	CMD14_GET_FILE_SIZE	0x0C			/* 主机文件模式: 获取当前文件长度 */
+N/* 输入: 数据68H */
+N/* 输出: 当前文件长度(总长度32位,低字节在前) */
+N
+N#define	CMD50_SET_FILE_SIZE	0x0D			/* 主机文件模式: 设置当前文件长度 */
+N/* 输入: 数据68H, 当前文件长度(总长度32位,低字节在前) */
+N
+N#define	CMD11_SET_USB_MODE	0x15			/* 设置USB工作模式 */
+N/* 输入: 模式代码 */
+N/*       00H=未启用的设备方式, 01H=已启用的设备方式并且使用外部固件模式(串口不支持), 02H=已启用的设备方式并且使用内置固件模式 */
+N/*       03H=SD卡主机模式/未启用的主机模式,用于管理和存取SD卡中的文件 */
+N/*       04H=未启用的主机方式, 05H=已启用的主机方式, 06H=已启用的主机方式并且自动产生SOF包, 07H=已启用的主机方式并且复位USB总线 */
+N/* 输出: 操作状态( CMD_RET_SUCCESS或CMD_RET_ABORT, 其它值说明操作未完成 ) */
+N
+N#define	CMD01_GET_STATUS	0x22			/* 获取中断状态并取消中断请求 */
+N/* 输出: 中断状态 */
+N
+N#define	CMD00_UNLOCK_USB	0x23			/* 设备方式: 释放当前USB缓冲区 */
+N
+N#define	CMD01_RD_USB_DATA0	0x27			/* 从当前USB中断的端点缓冲区或者主机端点的接收缓冲区读取数据块 */
+N/* 输出: 长度, 数据流 */
+N
+N#define	CMD01_RD_USB_DATA	0x28			/* 设备方式: 从当前USB中断的端点缓冲区读取数据块, 并释放缓冲区, 相当于 CMD01_RD_USB_DATA0 + CMD00_UNLOCK_USB */
+N/* 输出: 长度, 数据流 */
+N
+N#define	CMD10_WR_USB_DATA7	0x2B			/* 设备方式: 向USB端点2的发送缓冲区写入数据块 */
+N/* 输入: 长度, 数据流 */
+N
+N#define	CMD10_WR_HOST_DATA	0x2C			/* 向USB主机端点的发送缓冲区写入数据块 */
+N/* 输入: 长度, 数据流 */
+N
+N#define	CMD01_WR_REQ_DATA	0x2D			/* 向内部指定缓冲区写入请求的数据块 */
+N/* 输出: 长度 */
+N/* 输入: 数据流 */
+N
+N#define	CMD20_WR_OFS_DATA	0x2E			/* 向内部缓冲区指定偏移地址写入数据块 */
+N/* 输入: 偏移, 长度, 数据流 */
+N
+N#define	CMD10_SET_FILE_NAME	0x2F			/* 主机文件模式: 设置将要操作的文件的文件名 */
+N/* 输入: 以0结束的字符串(含结束符0在内长度不超过14个字符) */
+N
+N/* ********************************************************************************************************************* */
+N/* 主要命令(手册一), 常用, 以下命令总是在操作结束时产生中断通知, 并且总是没有输出数据 */
+N
+N#define	CMD0H_DISK_CONNECT	0x30			/* 主机文件模式/不支持SD卡: 检查磁盘是否连接 */
+N/* 输出中断 */
+N
+N#define	CMD0H_DISK_MOUNT	0x31			/* 主机文件模式: 初始化磁盘并测试磁盘是否就绪 */
+N/* 输出中断 */
+N
+N#define	CMD0H_FILE_OPEN		0x32			/* 主机文件模式: 打开文件或者目录(文件夹),或者枚举文件和目录(文件夹) */
+N/* 输出中断 */
+N
+N#define	CMD0H_FILE_ENUM_GO	0x33			/* 主机文件模式: 继续枚举文件和目录(文件夹) */
+N/* 输出中断 */
+N
+N#define	CMD0H_FILE_CREATE	0x34			/* 主机文件模式: 新建文件,如果文件已经存在那么先删除 */
+N/* 输出中断 */
+N
+N#define	CMD0H_FILE_ERASE	0x35			/* 主机文件模式: 删除文件,如果已经打开则直接删除,否则对于文件会先打开再删除,子目录必须先打开 */
+N/* 输出中断 */
+N
+N#define	CMD1H_FILE_CLOSE	0x36			/* 主机文件模式: 关闭当前已经打开的文件或者目录(文件夹) */
+N/* 输入: 是否允许更新文件长度 */
+N/*          00H=禁止更新长度, 01H=允许更新长度 */
+N/* 输出中断 */
+N
+N#define	CMD1H_DIR_INFO_READ	0x37			/* 主机文件模式: 读取文件的目录信息 */
+N/* 输入: 指定需要读取的目录信息结构在扇区内的索引号 */
+N/*           索引号范围为00H~0FH, 索引号0FFH则为当前已经打开的文件 */
+N/* 输出中断 */
+N
+N#define	CMD0H_DIR_INFO_SAVE	0x38			/* 主机文件模式: 保存文件的目录信息 */
+N/* 输出中断 */
+N
+N#define	CMD4H_BYTE_LOCATE	0x39			/* 主机文件模式: 以字节为单位移动当前文件指针 */
+N/* 输入: 偏移字节数(总长度32位,低字节在前) */
+N/* 输出中断 */
+N
+N#define	CMD2H_BYTE_READ		0x3A			/* 主机文件模式: 以字节为单位从当前位置读取数据块 */
+N/* 输入: 请求读取的字节数(总长度16位,低字节在前) */
+N/* 输出中断 */
+N
+N#define	CMD0H_BYTE_RD_GO	0x3B			/* 主机文件模式: 继续字节读 */
+N/* 输出中断 */
+N
+N#define	CMD2H_BYTE_WRITE	0x3C			/* 主机文件模式: 以字节为单位向当前位置写入数据块 */
+N/* 输入: 请求写入的字节数(总长度16位,低字节在前) */
+N/* 输出中断 */
+N
+N#define	CMD0H_BYTE_WR_GO	0x3D			/* 主机文件模式: 继续字节写 */
+N/* 输出中断 */
+N
+N#define	CMD0H_DISK_CAPACITY	0x3E			/* 主机文件模式: 查询磁盘物理容量 */
+N/* 输出中断 */
+N
+N#define	CMD0H_DISK_QUERY	0x3F			/* 主机文件模式: 查询磁盘空间信息 */
+N/* 输出中断 */
+N
+N#define	CMD0H_DIR_CREATE	0x40			/* 主机文件模式: 新建目录(文件夹)并打开,如果目录已经存在那么直接打开 */
+N/* 输出中断 */
+N
+N#define	CMD4H_SEC_LOCATE	0x4A			/* 主机文件模式: 以扇区为单位移动当前文件指针 */
+N/* 输入: 偏移扇区数(总长度32位,低字节在前) */
+N/* 输出中断 */
+N
+N#define	CMD1H_SEC_READ		0x4B			/* 主机文件模式/不支持SD卡: 以扇区为单位从当前位置读取数据块 */
+N/* 输入: 请求读取的扇区数 */
+N/* 输出中断 */
+N
+N#define	CMD1H_SEC_WRITE		0x4C			/* 主机文件模式/不支持SD卡: 以扇区为单位在当前位置写入数据块 */
+N/* 输入: 请求写入的扇区数 */
+N/* 输出中断 */
+N
+N#define	CMD0H_DISK_BOC_CMD	0x50			/* 主机方式/不支持SD卡: 对USB存储器执行BulkOnly传输协议的命令 */
+N/* 输出中断 */
+N
+N#define	CMD5H_DISK_READ		0x54			/* 主机方式/不支持SD卡: 从USB存储器读物理扇区 */
+N/* 输入: LBA物理扇区地址(总长度32位, 低字节在前), 扇区数(01H~FFH) */
+N/* 输出中断 */
+N
+N#define	CMD0H_DISK_RD_GO	0x55			/* 主机方式/不支持SD卡: 继续执行USB存储器的物理扇区读操作 */
+N/* 输出中断 */
+N
+N#define	CMD5H_DISK_WRITE	0x56			/* 主机方式/不支持SD卡: 向USB存储器写物理扇区 */
+N/* 输入: LBA物理扇区地址(总长度32位, 低字节在前), 扇区数(01H~FFH) */
+N/* 输出中断 */
+N
+N#define	CMD0H_DISK_WR_GO	0x57			/* 主机方式/不支持SD卡: 继续执行USB存储器的物理扇区写操作 */
+N/* 输出中断 */
+N
+N/* ********************************************************************************************************************* */
+N/* 辅助命令(手册二), 不太常用或者是为了与CH375和CH372兼容 */
+N
+N#define	CMD10_SET_USB_SPEED	0x04			/* 设置USB总线速度, 在每次CMD11_SET_USB_MODE设置USB工作模式时会自动恢复到12Mbps全速 */
+N/* 输入: 总线速度代码 */
+N/*           00H=12Mbps全速FullSpeed（默认值）, 01H=1.5Mbps（仅修改频率）, 02H=1.5Mbps低速LowSpeed */
+N
+N#define	CMD11_GET_DEV_RATE	0x0A			/* 主机方式: 获取当前连接的USB设备的数据速率类型 */
+N/* 输入: 数据07H */
+N/* 输出: 数据速率类型 */
+N/*           位4为1则是1.5Mbps低速USB设备, 否则是12Mbps全速USB设备 */
+N
+N#define	CMD11_GET_TOGGLE	0x0A			/* 获取OUT事务的同步状态 */
+N/* 输入: 数据1AH */
+N/* 输出: 同步状态 */
+N/*           位4为1则OUT事务同步, 否则OUT事务不同步 */
+N
+N#define	CMD11_READ_VAR8		0x0A			/* 读取指定的8位文件系统变量 */
+N/* 输入: 变量地址 */
+N/* 输出: 数据 */
+N
+N/*#define	CMD11_GET_MAX_LUN	= CMD11_READ_VAR8( VAR_UDISK_LUN )*/	/* 主机方式: 获取USB存储器最大和当前逻辑单元号 */
+N
+N#define	CMD20_SET_RETRY		0x0B			/* 主机方式: 设置USB事务操作的重试次数 */
+N/* 输入: 数据25H, 重试次数 */
+N/*           位7为0则收到NAK时不重试, 位7为1位6为0则收到NAK时无限重试, 位7为1位6为1则收到NAK时最多重试3秒, 位5~位0为超时后的重试次数 */
+N
+N#define	CMD20_WRITE_VAR8	0x0B			/* 设置指定的8位文件系统变量 */
+N/* 输入: 变量地址, 数据 */
+N
+N/*#define	CMD20_SET_DISK_LUN	= CMD20_WRITE_VAR8( VAR_UDISK_LUN )*/	/* 主机方式: 设置USB存储器的当前逻辑单元号 */
+N
+N#define	CMD14_READ_VAR32	0x0C			/* 读取指定的32位文件系统变量 */
+N/* 输入: 变量地址 */
+N/* 输出: 数据(总长度32位,低字节在前) */
+N
+N#define	CMD50_WRITE_VAR32	0x0D			/* 设置指定的32位文件系统变量 */
+N/* 输入: 变量地址, 数据(总长度32位,低字节在前) */
+N
+N#define	CMD01_DELAY_100US	0x0F			/* 延时100uS(串口不支持) */
+N/* 输出: 延时期间输出0,延时结束输出非0 */
+N
+N#define	CMD40_SET_USB_ID	0x12			/* 设备方式: 设置USB厂商VID和产品PID */
+N/* 输入: 厂商ID低字节, 厂商ID高字节, 产品ID低字节, 产品ID高字节 */
+N
+N#define	CMD10_SET_USB_ADDR	0x13			/* 设置USB地址 */
+N/* 输入: 地址值 */
+N
+N#define	CMD01_TEST_CONNECT	0x16			/* 主机方式/不支持SD卡: 检查USB设备连接状态 */
+N/* 输出: 状态( USB_INT_CONNECT或USB_INT_DISCONNECT或USB_INT_USB_READY, 其它值说明操作未完成 ) */
+N
+N#define	CMD00_ABORT_NAK		0x17			/* 主机方式: 放弃当前NAK的重试 */
+N
+N#define	CMD10_SET_ENDP2		0x18			/* 设备方式(串口不支持): 设置USB端点0的接收器 */
+N/* 输入: 工作方式 */
+N/*           位7为1则位6为同步触发位, 否则同步触发位不变 */
+N/*           位3~位0为事务响应方式:  0000-就绪ACK, 1110-正忙NAK, 1111-错误STALL */
+N
+N#define	CMD10_SET_ENDP3		0x19			/* 设备方式(串口不支持): 设置USB端点0的发送器 */
+N/* 输入: 工作方式 */
+N/*           位7为1则位6为同步触发位, 否则同步触发位不变 */
+N/*           位3~位0为事务响应方式:  0000~1000-就绪ACK, 1110-正忙NAK, 1111-错误STALL */
+N
+N#define	CMD10_SET_ENDP4		0x1A			/* 设备方式(串口不支持): 设置USB端点1的接收器 */
+N/* 输入: 工作方式 */
+N/*           位7为1则位6为同步触发位, 否则同步触发位不变 */
+N/*           位3~位0为事务响应方式:  0000-就绪ACK, 1110-正忙NAK, 1111-错误STALL */
+N
+N#define	CMD10_SET_ENDP5		0x1B			/* 设备方式(串口不支持): 设置USB端点1的发送器 */
+N/* 输入: 工作方式 */
+N/*           位7为1则位6为同步触发位, 否则同步触发位不变 */
+N/*           位3~位0为事务响应方式:  0000~1000-就绪ACK, 1110-正忙NAK, 1111-错误STALL */
+N
+N#define	CMD10_SET_ENDP6		0x1C			/* 设置USB端点2/主机端点的接收器 */
+N/* 输入: 工作方式 */
+N/*           位7为1则位6为同步触发位, 否则同步触发位不变 */
+N/*           位3~位0为事务响应方式:  0000-就绪ACK, 1101-就绪但不返回ACK, 1110-正忙NAK, 1111-错误STALL */
+N
+N#define	CMD10_SET_ENDP7		0x1D			/* 设置USB端点2/主机端点的发送器 */
+N/* 输入: 工作方式 */
+N/*           位7为1则位6为同步触发位, 否则同步触发位不变 */
+N/*           位3~位0为事务响应方式:  0000-就绪ACK, 1101-就绪但无须应答, 1110-正忙NAK, 1111-错误STALL */
+N
+N#define	CMD00_DIRTY_BUFFER	0x25			/* 主机文件模式: 清除内部的磁盘和文件缓冲区 */
+N
+N#define	CMD10_WR_USB_DATA3	0x29			/* 设备方式(串口不支持): 向USB端点0的发送缓冲区写入数据块 */
+N/* 输入: 长度, 数据流 */
+N
+N#define	CMD10_WR_USB_DATA5	0x2A			/* 设备方式(串口不支持): 向USB端点1的发送缓冲区写入数据块 */
+N/* 输入: 长度, 数据流 */
+N
+N/* ********************************************************************************************************************* */
+N/* 辅助命令(手册二), 不太常用或者是为了与CH375和CH372兼容, 以下命令总是在操作结束时产生中断通知, 并且总是没有输出数据 */
+N
+N#define	CMD1H_CLR_STALL		0x41			/* 主机方式: 控制传输-清除端点错误 */
+N/* 输入: 端点号 */
+N/* 输出中断 */
+N
+N#define	CMD1H_SET_ADDRESS	0x45			/* 主机方式: 控制传输-设置USB地址 */
+N/* 输入: 地址值 */
+N/* 输出中断 */
+N
+N#define	CMD1H_GET_DESCR		0x46			/* 主机方式: 控制传输-获取描述符 */
+N/* 输入: 描述符类型 */
+N/* 输出中断 */
+N
+N#define	CMD1H_SET_CONFIG	0x49			/* 主机方式: 控制传输-设置USB配置 */
+N/* 输入: 配置值 */
+N/* 输出中断 */
+N
+N#define	CMD0H_AUTO_SETUP	0x4D			/* 主机方式/不支持SD卡: 自动配置USB设备 */
+N/* 输出中断 */
+N
+N#define	CMD2H_ISSUE_TKN_X	0x4E			/* 主机方式: 发出同步令牌, 执行事务, 该命令可代替 CMD10_SET_ENDP6/CMD10_SET_ENDP7 + CMD1H_ISSUE_TOKEN */
+N/* 输入: 同步标志, 事务属性 */
+N/*           同步标志的位7为主机端点IN的同步触发位, 位6为主机端点OUT的同步触发位, 位5~位0必须为0 */
+N/*           事务属性的低4位是令牌, 高4位是端点号 */
+N/* 输出中断 */
+N
+N#define	CMD1H_ISSUE_TOKEN	0x4F			/* 主机方式: 发出令牌, 执行事务, 建议用CMD2H_ISSUE_TKN_X命令 */
+N/* 输入: 事务属性 */
+N/*           低4位是令牌, 高4位是端点号 */
+N/* 输出中断 */
+N
+N#define	CMD0H_DISK_INIT		0x51			/* 主机方式/不支持SD卡: 初始化USB存储器 */
+N/* 输出中断 */
+N
+N#define	CMD0H_DISK_RESET	0x52			/* 主机方式/不支持SD卡: 控制传输-复位USB存储器 */
+N/* 输出中断 */
+N
+N#define	CMD0H_DISK_SIZE		0x53			/* 主机方式/不支持SD卡: 获取USB存储器的容量 */
+N/* 输出中断 */
+N
+N#define	CMD0H_DISK_INQUIRY	0x58			/* 主机方式/不支持SD卡: 查询USB存储器特性 */
+N/* 输出中断 */
+N
+N#define	CMD0H_DISK_READY	0x59			/* 主机方式/不支持SD卡: 检查USB存储器就绪 */
+N/* 输出中断 */
+N
+N#define	CMD0H_DISK_R_SENSE	0x5A			/* 主机方式/不支持SD卡: 检查USB存储器错误 */
+N/* 输出中断 */
+N
+N#define	CMD0H_RD_DISK_SEC	0x5B			/* 主机文件模式: 从磁盘读取一个扇区的数据到内部缓冲区 */
+N/* 输出中断 */
+N
+N#define	CMD0H_WR_DISK_SEC	0x5C			/* 主机文件模式: 将内部缓冲区的一个扇区的数据写入磁盘 */
+N/* 输出中断 */
+N
+N#define	CMD0H_DISK_MAX_LUN	0x5D			/* 主机方式: 控制传输-获取USB存储器最大逻辑单元号 */
+N/* 输出中断 */
+N
+N/* ********************************************************************************************************************* */
+N/* 以下定义只是为了兼容CH375的INCLUDE文件中的命令名称格式 */
+N
+N#ifndef	_NO_CH375_COMPATIBLE_
+N#define	CMD_GET_IC_VER		CMD01_GET_IC_VER
+N#define	CMD_SET_BAUDRATE	CMD21_SET_BAUDRATE
+N#define	CMD_ENTER_SLEEP		CMD00_ENTER_SLEEP
+N#define	CMD_RESET_ALL		CMD00_RESET_ALL
+N#define	CMD_CHECK_EXIST		CMD11_CHECK_EXIST
+N#define	CMD_CHK_SUSPEND		CMD20_CHK_SUSPEND
+N#define	CMD_SET_SDO_INT		CMD20_SET_SDO_INT
+N#define	CMD_GET_FILE_SIZE	CMD14_GET_FILE_SIZE
+N#define	CMD_SET_FILE_SIZE	CMD50_SET_FILE_SIZE
+N#define	CMD_SET_USB_MODE	CMD11_SET_USB_MODE
+N#define	CMD_GET_STATUS		CMD01_GET_STATUS
+N#define	CMD_UNLOCK_USB		CMD00_UNLOCK_USB
+N#define	CMD_RD_USB_DATA0	CMD01_RD_USB_DATA0
+N#define	CMD_RD_USB_DATA		CMD01_RD_USB_DATA
+N#define	CMD_WR_USB_DATA7	CMD10_WR_USB_DATA7
+N#define	CMD_WR_HOST_DATA	CMD10_WR_HOST_DATA
+N#define	CMD_WR_REQ_DATA		CMD01_WR_REQ_DATA
+N#define	CMD_WR_OFS_DATA		CMD20_WR_OFS_DATA
+N#define	CMD_SET_FILE_NAME	CMD10_SET_FILE_NAME
+N#define	CMD_DISK_CONNECT	CMD0H_DISK_CONNECT
+N#define	CMD_DISK_MOUNT		CMD0H_DISK_MOUNT
+N#define	CMD_FILE_OPEN		CMD0H_FILE_OPEN
+N#define	CMD_FILE_ENUM_GO	CMD0H_FILE_ENUM_GO
+N#define	CMD_FILE_CREATE		CMD0H_FILE_CREATE
+N#define	CMD_FILE_ERASE		CMD0H_FILE_ERASE
+N#define	CMD_FILE_CLOSE		CMD1H_FILE_CLOSE
+N#define	CMD_DIR_INFO_READ	CMD1H_DIR_INFO_READ
+N#define	CMD_DIR_INFO_SAVE	CMD0H_DIR_INFO_SAVE
+N#define	CMD_BYTE_LOCATE		CMD4H_BYTE_LOCATE
+N#define	CMD_BYTE_READ		CMD2H_BYTE_READ
+N#define	CMD_BYTE_RD_GO		CMD0H_BYTE_RD_GO
+N#define	CMD_BYTE_WRITE		CMD2H_BYTE_WRITE
+N#define	CMD_BYTE_WR_GO		CMD0H_BYTE_WR_GO
+N#define	CMD_DISK_CAPACITY	CMD0H_DISK_CAPACITY
+N#define	CMD_DISK_QUERY		CMD0H_DISK_QUERY
+N#define	CMD_DIR_CREATE		CMD0H_DIR_CREATE
+N#define	CMD_SEC_LOCATE		CMD4H_SEC_LOCATE
+N#define	CMD_SEC_READ		CMD1H_SEC_READ
+N#define	CMD_SEC_WRITE		CMD1H_SEC_WRITE
+N#define	CMD_DISK_BOC_CMD	CMD0H_DISK_BOC_CMD
+N#define	CMD_DISK_READ		CMD5H_DISK_READ
+N#define	CMD_DISK_RD_GO		CMD0H_DISK_RD_GO
+N#define	CMD_DISK_WRITE		CMD5H_DISK_WRITE
+N#define	CMD_DISK_WR_GO		CMD0H_DISK_WR_GO
+N#define	CMD_SET_USB_SPEED	CMD10_SET_USB_SPEED
+N#define	CMD_GET_DEV_RATE	CMD11_GET_DEV_RATE
+N#define	CMD_GET_TOGGLE		CMD11_GET_TOGGLE
+N#define	CMD_READ_VAR8		CMD11_READ_VAR8
+N#define	CMD_SET_RETRY		CMD20_SET_RETRY
+N#define	CMD_WRITE_VAR8		CMD20_WRITE_VAR8
+N#define	CMD_READ_VAR32		CMD14_READ_VAR32
+N#define	CMD_WRITE_VAR32		CMD50_WRITE_VAR32
+N#define	CMD_DELAY_100US		CMD01_DELAY_100US
+N#define	CMD_SET_USB_ID		CMD40_SET_USB_ID
+N#define	CMD_SET_USB_ADDR	CMD10_SET_USB_ADDR
+N#define	CMD_TEST_CONNECT	CMD01_TEST_CONNECT
+N#define	CMD_ABORT_NAK		CMD00_ABORT_NAK
+N#define	CMD_SET_ENDP2		CMD10_SET_ENDP2
+N#define	CMD_SET_ENDP3		CMD10_SET_ENDP3
+N#define	CMD_SET_ENDP4		CMD10_SET_ENDP4
+N#define	CMD_SET_ENDP5		CMD10_SET_ENDP5
+N#define	CMD_SET_ENDP6		CMD10_SET_ENDP6
+N#define	CMD_SET_ENDP7		CMD10_SET_ENDP7
+N#define	CMD_DIRTY_BUFFER	CMD00_DIRTY_BUFFER
+N#define	CMD_WR_USB_DATA3	CMD10_WR_USB_DATA3
+N#define	CMD_WR_USB_DATA5	CMD10_WR_USB_DATA5
+N#define	CMD_CLR_STALL		CMD1H_CLR_STALL
+N#define	CMD_SET_ADDRESS		CMD1H_SET_ADDRESS
+N#define	CMD_GET_DESCR		CMD1H_GET_DESCR
+N#define	CMD_SET_CONFIG		CMD1H_SET_CONFIG
+N#define	CMD_AUTO_SETUP		CMD0H_AUTO_SETUP
+N#define	CMD_ISSUE_TKN_X		CMD2H_ISSUE_TKN_X
+N#define	CMD_ISSUE_TOKEN		CMD1H_ISSUE_TOKEN
+N#define	CMD_DISK_INIT		CMD0H_DISK_INIT
+N#define	CMD_DISK_RESET		CMD0H_DISK_RESET
+N#define	CMD_DISK_SIZE		CMD0H_DISK_SIZE
+N#define	CMD_DISK_INQUIRY	CMD0H_DISK_INQUIRY
+N#define	CMD_DISK_READY		CMD0H_DISK_READY
+N#define	CMD_DISK_R_SENSE	CMD0H_DISK_R_SENSE
+N#define	CMD_RD_DISK_SEC		CMD0H_RD_DISK_SEC
+N#define	CMD_WR_DISK_SEC		CMD0H_WR_DISK_SEC
+N#define	CMD_DISK_MAX_LUN	CMD0H_DISK_MAX_LUN
+N#endif
+N
+N/* ********************************************************************************************************************* */
+N/* 并口方式, 状态端口(读命令端口)的位定义 */
+N#ifndef	PARA_STATE_INTB
+N#define	PARA_STATE_INTB		0x80			/* 并口方式状态端口的位7: 中断标志,低有效 */
+N#define	PARA_STATE_BUSY		0x10			/* 并口方式状态端口的位4: 忙标志,高有效 */
+N#endif
+N
+N/* ********************************************************************************************************************* */
+N/* 串口方式, 操作命令前的引导同步码 */
+N#ifndef	SER_CMD_TIMEOUT
+N#define	SER_CMD_TIMEOUT		32				/* 串口命令超时时间, 单位为mS, 同步码之间及同步码与命令码之间的间隔应该尽量短, 超时后的处理方式为丢弃 */
+N#define	SER_SYNC_CODE1		0x57			/* 启动操作的第1个串口同步码 */
+N#define	SER_SYNC_CODE2		0xAB			/* 启动操作的第2个串口同步码 */
+N#endif
+N
+N/* ********************************************************************************************************************* */
+N/* 操作状态 */
+N
+N#ifndef	CMD_RET_SUCCESS
+N#define	CMD_RET_SUCCESS		0x51			/* 命令操作成功 */
+N#define	CMD_RET_ABORT		0x5F			/* 命令操作失败 */
+N#endif
+N
+N/* ********************************************************************************************************************* */
+N/* USB中断状态 */
+N
+N#ifndef	USB_INT_EP0_SETUP
+N
+N/* 以下状态代码为特殊事件中断, 如果通过CMD20_CHK_SUSPEND启用USB总线挂起检查, 那么必须处理USB总线挂起和睡眠唤醒的中断状态 */
+N#define	USB_INT_USB_SUSPEND	0x05			/* USB总线挂起事件 */
+N#define	USB_INT_WAKE_UP		0x06			/* 从睡眠中被唤醒事件 */
+N
+N/* 以下状态代码0XH用于USB设备方式 */
+N/*   内置固件模式下只需要处理: USB_INT_EP1_OUT, USB_INT_EP1_IN, USB_INT_EP2_OUT, USB_INT_EP2_IN */
+N/*   位7-位4为0000 */
+N/*   位3-位2指示当前事务, 00=OUT, 10=IN, 11=SETUP */
+N/*   位1-位0指示当前端点, 00=端点0, 01=端点1, 10=端点2, 11=USB总线复位 */
+N#define	USB_INT_EP0_SETUP	0x0C			/* USB端点0的SETUP */
+N#define	USB_INT_EP0_OUT		0x00			/* USB端点0的OUT */
+N#define	USB_INT_EP0_IN		0x08			/* USB端点0的IN */
+N#define	USB_INT_EP1_OUT		0x01			/* USB端点1的OUT */
+N#define	USB_INT_EP1_IN		0x09			/* USB端点1的IN */
+N#define	USB_INT_EP2_OUT		0x02			/* USB端点2的OUT */
+N#define	USB_INT_EP2_IN		0x0A			/* USB端点2的IN */
+N/* USB_INT_BUS_RESET	0x0000XX11B */		/* USB总线复位 */
+N#define	USB_INT_BUS_RESET1	0x03			/* USB总线复位 */
+N#define	USB_INT_BUS_RESET2	0x07			/* USB总线复位 */
+N#define	USB_INT_BUS_RESET3	0x0B			/* USB总线复位 */
+N#define	USB_INT_BUS_RESET4	0x0F			/* USB总线复位 */
+N
+N#endif
+N
+N/* 以下状态代码2XH-3XH用于USB主机方式的通讯失败代码 */
+N/*   位7-位6为00 */
+N/*   位5为1 */
+N/*   位4指示当前接收的数据包是否同步 */
+N/*   位3-位0指示导致通讯失败时USB设备的应答: 0010=ACK, 1010=NAK, 1110=STALL, 0011=DATA0, 1011=DATA1, XX00=超时 */
+N/* USB_INT_RET_ACK	0x001X0010B */			/* 错误:对于IN事务返回ACK */
+N/* USB_INT_RET_NAK	0x001X1010B */			/* 错误:返回NAK */
+N/* USB_INT_RET_STALL	0x001X1110B */		/* 错误:返回STALL */
+N/* USB_INT_RET_DATA0	0x001X0011B */		/* 错误:对于OUT/SETUP事务返回DATA0 */
+N/* USB_INT_RET_DATA1	0x001X1011B */		/* 错误:对于OUT/SETUP事务返回DATA1 */
+N/* USB_INT_RET_TOUT	0x001XXX00B */			/* 错误:返回超时 */
+N/* USB_INT_RET_TOGX	0x0010X011B */			/* 错误:对于IN事务返回数据不同步 */
+N/* USB_INT_RET_PID	0x001XXXXXB */			/* 错误:未定义 */
+N
+N/* 以下状态代码1XH用于USB主机方式的操作状态代码 */
+N#ifndef	USB_INT_SUCCESS
+N#define	USB_INT_SUCCESS		0x14			/* USB事务或者传输操作成功 */
+N#define	USB_INT_CONNECT		0x15			/* 检测到USB设备连接事件, 可能是新连接或者断开后重新连接 */
+N#define	USB_INT_DISCONNECT	0x16			/* 检测到USB设备断开事件 */
+N#define	USB_INT_BUF_OVER	0x17			/* USB传输的数据有误或者数据太多缓冲区溢出 */
+N#define	USB_INT_USB_READY	0x18			/* USB设备已经被初始化(已经分配USB地址) */
+N#define	USB_INT_DISK_READ	0x1D			/* USB存储器请求数据读出 */
+N#define	USB_INT_DISK_WRITE	0x1E			/* USB存储器请求数据写入 */
+N#define	USB_INT_DISK_ERR	0x1F			/* USB存储器操作失败 */
+N#endif
+N
+N/* 以下状态代码用于主机文件模式下的文件系统错误码 */
+N#ifndef	ERR_DISK_DISCON
+N#define	ERR_DISK_DISCON		0x82			/* 磁盘尚未连接,可能磁盘已经断开 */
+N#define	ERR_LARGE_SECTOR	0x84			/* 磁盘的扇区太大,只支持每扇区512字节 */
+N#define	ERR_TYPE_ERROR		0x92			/* 磁盘分区类型不支持,只支持FAT12/FAT16/BigDOS/FAT32,需要由磁盘管理工具重新分区 */
+N#define	ERR_BPB_ERROR		0xA1			/* 磁盘尚未格式化,或者参数错误,需要由WINDOWS采用默认参数重新格式化 */
+N#define	ERR_DISK_FULL		0xB1			/* 磁盘文件太满,剩余空间太少或者已经没有,需要磁盘整理 */
+N#define	ERR_FDT_OVER		0xB2			/* 目录(文件夹)内文件太多,没有空闲的目录项,FAT12/FAT16根目录下的文件数应该少于512个,需要磁盘整理 */
+N#define	ERR_FILE_CLOSE		0xB4			/* 文件已经关闭,如果需要使用,应该重新打开文件 */
+N#define	ERR_OPEN_DIR		0x41			/* 指定路径的目录(文件夹)被打开 */
+N#define	ERR_MISS_FILE		0x42			/* 指定路径的文件没有找到,可能是文件名称错误 */
+N#define	ERR_FOUND_NAME		0x43			/* 搜索到相匹配的文件名,或者是要求打开目录(文件夹)而实际结果却打开了文件 */
+N/* 以下文件系统错误码用于文件系统子程序 */
+N#define	ERR_MISS_DIR		0xB3			/* 指定路径的某个子目录(文件夹)没有找到,可能是目录名称错误 */
+N#define	ERR_LONG_BUF_OVER	0x48			/* 长文件缓冲区溢出 */
+N#define	ERR_LONG_NAME_ERR	0x49			/* 短文件名没有对应的长文件名或者长文件名错误 */
+N#define	ERR_NAME_EXIST		0x4A			/* 同名的短文件已经存在,建议重新生成另外一个短文件名 */
+N#endif
+N
+N/* ********************************************************************************************************************* */
+N/* 以下状态代码用于主机文件模式下的磁盘及文件状态, VAR_DISK_STATUS */
+N#ifndef	DEF_DISK_UNKNOWN
+N#define	DEF_DISK_UNKNOWN	0x00			/* 尚未初始化,未知状态 */
+N#define	DEF_DISK_DISCONN	0x01			/* 磁盘没有连接或者已经断开 */
+N#define	DEF_DISK_CONNECT	0x02			/* 磁盘已经连接,但是尚未初始化或者无法识别该磁盘 */
+N#define	DEF_DISK_MOUNTED	0x03			/* 磁盘已经初始化成功,但是尚未分析文件系统或者文件系统不支持 */
+N#define	DEF_DISK_READY		0x10			/* 已经分析磁盘的文件系统并且能够支持 */
+N#define	DEF_DISK_OPEN_ROOT	0x12			/* 已经打开根目录,使用后必须关闭,注意FAT12/FAT16根目录是固定长度 */
+N#define	DEF_DISK_OPEN_DIR	0x13			/* 已经打开子目录(文件夹) */
+N#define	DEF_DISK_OPEN_FILE	0x14			/* 已经打开文件 */
+N#endif
+N
+N/* ********************************************************************************************************************* */
+N/* 文件系统常用定义 */
+N
+N#ifndef	DEF_SECTOR_SIZE
+N#define	DEF_SECTOR_SIZE		512				/* U盘或者SD卡默认的物理扇区的大小 */
+N#endif
+N
+N#ifndef	DEF_WILDCARD_CHAR
+N#define	DEF_WILDCARD_CHAR	0x2A			/* 路径名的通配符 '*' */
+N#define	DEF_SEPAR_CHAR1		0x5C			/* 路径名的分隔符 '\' */
+N#define	DEF_SEPAR_CHAR2		0x2F			/* 路径名的分隔符 '/' */
+N#define	DEF_FILE_YEAR		2004			/* 默认文件日期: 2004年 */
+N#define	DEF_FILE_MONTH		1				/* 默认文件日期: 1月 */
+N#define	DEF_FILE_DATE		1				/* 默认文件日期: 1日 */
+N#endif
+N
+N#ifndef	ATTR_DIRECTORY
+N
+N/* FAT数据区中文件目录信息 */
+Ntypedef struct _FAT_DIR_INFO {
+N	UINT8	DIR_Name[11];					/* 00H,文件名,共11字节,不足处填空格 */
+N	UINT8	DIR_Attr;						/* 0BH,文件属性,参考后面的说明 */
+N	UINT8	DIR_NTRes;						/* 0CH */
+N	UINT8	DIR_CrtTimeTenth;				/* 0DH,文件创建的时间,以0.1秒单位计数 */
+N	UINT16	DIR_CrtTime;					/* 0EH,文件创建的时间 */
+N	UINT16	DIR_CrtDate;					/* 10H,文件创建的日期 */
+N	UINT16	DIR_LstAccDate;					/* 12H,最近一次存取操作的日期 */
+N	UINT16	DIR_FstClusHI;					/* 14H */
+N	UINT16	DIR_WrtTime;					/* 16H,文件修改时间,参考前面的宏MAKE_FILE_TIME */
+N	UINT16	DIR_WrtDate;					/* 18H,文件修改日期,参考前面的宏MAKE_FILE_DATE */
+N	UINT16	DIR_FstClusLO;					/* 1AH */
+N	UINT32	DIR_FileSize;					/* 1CH,文件长度 */
+N} FAT_DIR_INFO, *P_FAT_DIR_INFO;			/* 20H */
+N
+N/* 文件属性 */
+N#define ATTR_READ_ONLY			0x01		/* 文件为只读属性 */
+N#define ATTR_HIDDEN				0x02		/* 文件为隐含属性 */
+N#define ATTR_SYSTEM				0x04		/* 文件为系统属性 */
+N#define ATTR_VOLUME_ID			0x08		/* 卷标 */
+N#define ATTR_DIRECTORY			0x10		/* 子目录(文件夹) */
+N#define ATTR_ARCHIVE			0x20		/* 文件为存档属性 */
+N#define ATTR_LONG_NAME			( ATTR_READ_ONLY | ATTR_HIDDEN | ATTR_SYSTEM | ATTR_VOLUME_ID )	/* 长文件名属性 */
+N#define ATTR_LONG_NAME_MASK		( ATTR_LONG_NAME | ATTR_DIRECTORY | ATTR_ARCHIVE )
+N/* 文件属性 UINT8 */
+N/* bit0 bit1 bit2 bit3 bit4 bit5 bit6 bit7 */
+N/*  只   隐   系   卷   目   存   未定义   */
+N/*  读   藏   统   标   录   档            */
+N/* 文件时间 UINT16 */
+N/* Time = (Hour<<11) + (Minute<<5) + (Second>>1) */
+N#define MAKE_FILE_TIME( h, m, s )	( (h<<11) + (m<<5) + (s>>1) )	/* 生成指定时分秒的文件时间数据 */
+N/* 文件日期 UINT16 */
+N/* Date = ((Year-1980)<<9) + (Month<<5) + Day */
+N#define MAKE_FILE_DATE( y, m, d )	( ((y-1980)<<9) + (m<<5) + d )	/* 生成指定年月日的文件日期数据 */
+N
+N#define LONE_NAME_MAX_CHAR		(255*2)		/* 长文件名最多字符数/字节数 */
+N#define LONG_NAME_PER_DIR		(13*2)		/* 长文件名在每个文件目录信息结构中的字符数/字节数 */
+N
+N#endif
+N
+N/* ********************************************************************************************************************* */
+N/* SCSI命令和数据输入输出结构 */
+N
+N#ifndef	SPC_CMD_INQUIRY
+N
+N/* SCSI命令码 */
+N#define SPC_CMD_INQUIRY			0x12
+N#define SPC_CMD_READ_CAPACITY	0x25
+N#define SPC_CMD_READ10			0x28
+N#define SPC_CMD_WRITE10			0x2A
+N#define SPC_CMD_TEST_READY		0x00
+N#define SPC_CMD_REQUEST_SENSE	0x03
+N#define SPC_CMD_MODESENSE6		0x1A
+N#define SPC_CMD_MODESENSE10		0x5A
+N#define SPC_CMD_START_STOP		0x1B
+N
+N/* BulkOnly协议的命令块 */
+Ntypedef struct _BULK_ONLY_CBW {
+N	UINT32	CBW_Sig;
+N	UINT32	CBW_Tag;
+N	UINT8	CBW_DataLen0;					/* 08H,输入: 数据传输长度,对于输入数据其有效值是0到48,对于输出数据其有效值为0到33 */
+N	UINT8	CBW_DataLen1;
+N	UINT16	CBW_DataLen2;
+N	UINT8	CBW_Flag;						/* 0CH,输入: 传输方向等标志,位7为1则输入数据,位为0则输出数据或者没有数据 */
+N	UINT8	CBW_LUN;
+N	UINT8	CBW_CB_Len;						/* 0EH,输入: 命令块的长度,有效值是1到16 */
+N	UINT8	CBW_CB_Buf[16];					/* 0FH,输入: 命令块,该缓冲区最多为16个字节 */
+N} BULK_ONLY_CBW, *P_BULK_ONLY_CBW;			/* BulkOnly协议的命令块, 输入CBW结构 */
+N
+N/* INQUIRY命令的返回数据 */
+Ntypedef struct _INQUIRY_DATA {
+N	UINT8	DeviceType;					/* 00H, 设备类型 */
+N	UINT8	RemovableMedia;				/* 01H, 位7为1说明是移动存储 */
+N	UINT8	Versions;					/* 02H, 协议版本 */
+N	UINT8	DataFormatAndEtc;			/* 03H, 指定返回数据格式 */
+N	UINT8	AdditionalLength;			/* 04H, 后续数据的长度 */
+N	UINT8	Reserved1;
+N	UINT8	Reserved2;
+N	UINT8	MiscFlag;					/* 07H, 一些控制标志 */
+N	UINT8	VendorIdStr[8];				/* 08H, 厂商信息 */
+N	UINT8	ProductIdStr[16];			/* 10H, 产品信息 */
+N	UINT8	ProductRevStr[4];			/* 20H, 产品版本 */
+N} INQUIRY_DATA, *P_INQUIRY_DATA;		/* 24H */
+N
+N/* REQUEST SENSE命令的返回数据 */
+Ntypedef struct _SENSE_DATA {
+N	UINT8	ErrorCode;					/* 00H, 错误代码及有效位 */
+N	UINT8	SegmentNumber;
+N	UINT8	SenseKeyAndEtc;				/* 02H, 主键码 */
+N	UINT8	Information0;
+N	UINT8	Information1;
+N	UINT8	Information2;
+N	UINT8	Information3;
+N	UINT8	AdditSenseLen;				/* 07H, 后续数据的长度 */
+N	UINT8	CmdSpecInfo[4];
+N	UINT8	AdditSenseCode;				/* 0CH, 附加键码 */
+N	UINT8	AddSenCodeQual;				/* 0DH, 详细的附加键码 */
+N	UINT8	FieldReplaUnit;
+N	UINT8	SenseKeySpec[3];
+N} SENSE_DATA, *P_SENSE_DATA;			/* 12H */
+N
+N#endif
+N
+N/* ********************************************************************************************************************* */
+N/* 主机文件模式下的数据输入和输出结构 */
+N
+N#ifndef	MAX_FILE_NAME_LEN
+N
+N#define MAX_FILE_NAME_LEN		(13+1)		/* 文件名最大长度,最大长度是1个根目录符+8个主文件名+1个小数点+3个类型名+结束符=14 */
+N
+N/* 命令的输入数据和输出数据 */
+Ntypedef union _CH376_CMD_DATA {
+N	struct {
+N		UINT8	mBuffer[ MAX_FILE_NAME_LEN ];
+X		UINT8	mBuffer[ (13+1) ];
+N	} Default;
+N
+N	INQUIRY_DATA	DiskMountInq;			/* 返回: INQUIRY命令的返回数据 */
+N											/* CMD0H_DISK_MOUNT: 初始化磁盘并测试磁盘是否就绪,首次执行时 */
+N
+N	FAT_DIR_INFO	OpenDirInfo;			/* 返回: 枚举到的文件目录信息 */
+N											/* CMD0H_FILE_OPEN: 枚举文件和目录(文件夹) */
+N
+N	FAT_DIR_INFO	EnumDirInfo;			/* 返回: 枚举到的文件目录信息 */
+N											/* CMD0H_FILE_ENUM_GO: 继续枚举文件和目录(文件夹) */
+N
+N	struct {
+N		UINT8	mUpdateFileSz;				/* 输入参数: 是否允许更新文件长度, 0则禁止更新长度 */
+N	} FileCLose;							/* CMD1H_FILE_CLOSE: 关闭当前已经打开的文件 */
+N
+N	struct {
+N		UINT8	mDirInfoIndex;				/* 输入参数: 指定需要读取的目录信息结构在扇区内的索引号, 0FFH则为当前已经打开的文件 */
+N	} DirInfoRead;							/* CMD1H_DIR_INFO_READ: 读取文件的目录信息 */
+N
+N	union {
+N		UINT32	mByteOffset;				/* 输入参数: 偏移字节数,以字节为单位的偏移量(总长度32位,低字节在前) */
+N		UINT32	mSectorLba;					/* 返回: 当前文件指针对应的绝对线性扇区号,0FFFFFFFFH则已到文件尾(总长度32位,低字节在前) */
+N	} ByteLocate;							/* CMD4H_BYTE_LOCATE: 以字节为单位移动当前文件指针 */
+N
+N	struct {
+N		UINT16	mByteCount;					/* 输入参数: 请求读取的字节数(总长度16位,低字节在前) */
+N	} ByteRead;								/* CMD2H_BYTE_READ: 以字节为单位从当前位置读取数据块 */
+N
+N	struct {
+N		UINT16	mByteCount;					/* 输入参数: 请求写入的字节数(总长度16位,低字节在前) */
+N	} ByteWrite;							/* CMD2H_BYTE_WRITE: 以字节为单位向当前位置写入数据块 */
+N
+N	union {
+N		UINT32	mSectorOffset;				/* 输入参数: 偏移扇区数,以扇区为单位的偏移量(总长度32位,低字节在前) */
+N		UINT32	mSectorLba;					/* 返回: 当前文件指针对应的绝对线性扇区号,0FFFFFFFFH则已到文件尾(总长度32位,低字节在前) */
+N	} SectorLocate;							/* CMD4H_SEC_LOCATE: 以扇区为单位移动当前文件指针 */
+N
+N	struct {
+N		UINT8	mSectorCount;				/* 输入参数: 请求读取的扇区数 */
+N											/* 返回: 允许读取的扇区数 */
+N		UINT8	mReserved1;
+N		UINT8	mReserved2;
+N		UINT8	mReserved3;
+N		UINT32	mStartSector;				/* 返回: 允许读取的扇区块的起始绝对线性扇区号(总长度32位,低字节在前) */
+N	} SectorRead;							/* CMD1H_SEC_READ: 以扇区为单位从当前位置读取数据块 */
+N
+N	struct {
+N		UINT8	mSectorCount;				/* 输入参数: 请求写入的扇区数 */
+N											/* 返回: 允许写入的扇区数 */
+N		UINT8	mReserved1;
+N		UINT8	mReserved2;
+N		UINT8	mReserved3;
+N		UINT32	mStartSector;				/* 返回: 允许写入的扇区块的起始绝对线性扇区号(总长度32位,低字节在前) */
+N	} SectorWrite;							/* CMD1H_SEC_WRITE: 以扇区为单位在当前位置写入数据块 */
+N
+N	struct {
+N		UINT32	mDiskSizeSec;				/* 返回: 整个物理磁盘的总扇区数(总长度32位,低字节在前) */
+N	} DiskCapacity;							/* CMD0H_DISK_CAPACITY: 查询磁盘物理容量 */
+N
+N	struct {
+N		UINT32	mTotalSector;				/* 返回: 当前逻辑盘的总扇区数(总长度32位,低字节在前) */
+N		UINT32	mFreeSector;				/* 返回: 当前逻辑盘的剩余扇区数(总长度32位,低字节在前) */
+N		UINT8	mDiskFat;					/* 返回: 当前逻辑盘的FAT类型,1-FAT12,2-FAT16,3-FAT32 */
+N	} DiskQuery;							/* CMD_DiskQuery, 查询磁盘信息 */
+N
+N	BULK_ONLY_CBW	DiskBocCbw;				/* 输入参数: CBW命令结构 */
+N											/* CMD0H_DISK_BOC_CMD: 对USB存储器执行BulkOnly传输协议的命令 */
+N
+N	struct {
+N		UINT8	mMaxLogicUnit;				/* 返回: USB存储器的最大逻辑单元号 */
+N	} DiskMaxLun;							/* CMD0H_DISK_MAX_LUN: 控制传输-获取USB存储器最大逻辑单元号 */
+N
+N	INQUIRY_DATA	DiskInitInq;			/* 返回: INQUIRY命令的返回数据 */
+N											/* CMD0H_DISK_INIT: 初始化USB存储器 */
+N
+N	INQUIRY_DATA	DiskInqData;			/* 返回: INQUIRY命令的返回数据 */
+N											/* CMD0H_DISK_INQUIRY: 查询USB存储器特性 */
+N
+N	SENSE_DATA		ReqSenseData;			/* 返回: REQUEST SENSE命令的返回数据 */
+N											/* CMD0H_DISK_R_SENSE: 检查USB存储器错误 */
+N
+N	struct {
+N		UINT32	mDiskSizeSec;				/* 返回: 整个物理磁盘的总扇区数(总长度32位,高字节在前) */
+N	} DiskSize;								/* CMD0H_DISK_SIZE: 获取USB存储器的容量 */
+N
+N	struct {
+N		UINT32	mStartSector;				/* 输入参数: LBA扇区地址(总长度32位,低字节在前) */
+N		UINT8	mSectorCount;				/* 输入参数: 请求读取的扇区数 */
+N	} DiskRead;								/* CMD5H_DISK_READ: 从USB存储器读数据块(以扇区为单位) */
+N
+N	struct {
+N		UINT32	mStartSector;				/* 输入参数: LBA扇区地址(总长度32位,低字节在前) */
+N		UINT8	mSectorCount;				/* 输入参数: 请求写入的扇区数 */
+N	} DiskWrite;							/* CMD5H_DISK_WRITE: 向USB存储器写数据块(以扇区为单位) */
+N} CH376_CMD_DATA, *P_CH376_CMD_DATA;
+N
+N#endif
+N
+N/* ********************************************************************************************************************* */
+N/* 主机文件模式下的文件系统变量的地址 */
+N
+N#ifndef	VAR_FILE_SIZE
+N
+N/* 8位/单字节变量 */
+N#define	VAR_SYS_BASE_INFO	0x20			/* 当前系统的基本信息 */
+N/*           位6用于指示USB存储设备的子类别SubClass-Code, 位6为0则说明子类别为6, 位6为1则说明子类别是非6的其它值 */
+N/*           位5用于指示USB设备方式下的USB配置状态和USB主机方式下的USB设备连接状态 */
+N/*                USB设备方式下, 位5为1则USB配置完成, 位5位0则尚未配置 */
+N/*                USB主机方式下, 位5为1则USB端口存在USB设备, 位5位0则USB端口没有USB设备 */
+N/*           位4用于指示USB设备方式下的缓冲区锁定状态, 位4为1则说明USB缓冲区处于锁定状态, 位6为1则说明已经释放 */
+N/*           其它位, 保留,请勿修改 */
+N#define	VAR_RETRY_TIMES		0x25			/* USB事务操作的重试次数 */
+N/*           位7为0则收到NAK时不重试, 位7为1位6为0则收到NAK时无限重试(可以用CMD_ABORT_NAK命令放弃重试), 位7为1位6为1则收到NAK时最多重试3秒 */
+N/*           位5~位0为超时后的重试次数 */
+N#define	VAR_FILE_BIT_FLAG	0x26			/* 主机文件模式下的位标志 */
+N/*           位1和位0, 逻辑盘的FAT文件系统标志, 00-FAT12, 01-FAT16, 10-FAT32, 11-非法 */
+N/*           位2, 当前缓冲区中的FAT表数据是否被修改标志, 0-未修改, 1-已修改 */
+N/*           位3, 文件长度需要修改标志, 当前文件被追加数据, 0-未追加无需修改, 1-已追加需要修改 */
+N/*           其它位, 保留,请勿修改 */
+N#define	VAR_DISK_STATUS		0x2B			/* 主机文件模式下的磁盘及文件状态 */
+N#define	VAR_SD_BIT_FLAG		0x30			/* 主机文件模式下SD卡的位标志 */
+N/*           位0, SD卡版本, 0-只支持SD第一版,1-支持SD第二版 */
+N/*           位1, 自动识别, 0-SD卡, 1-MMC卡 */
+N/*           位2, 自动识别, 0-标准容量SD卡, 1-大容量SD卡(HC-SD) */
+N/*           位4, ACMD41命令超时 */
+N/*           位5, CMD1命令超时 */
+N/*           位6, CMD58命令超时 */
+N/*           其它位, 保留,请勿修改 */
+N#define	VAR_UDISK_TOGGLE	0x31			/* USB存储设备的BULK-IN/BULK-OUT端点的同步标志 */
+N/*           位7, Bulk-In端点的同步标志 */
+N/*           位6, Bulk-In端点的同步标志 */
+N/*           位5~位0, 必须为0 */
+N#define	VAR_UDISK_LUN		0x34			/* USB存储设备的逻辑单元号 */
+N/*           位7~位4, USB存储设备的当前逻辑单元号,CH376初始化USB存储设备后,默认是访问0#逻辑单元 */
+N/*           位3~位0, USB存储设备的最大逻辑单元号,加1后等于逻辑单元数 */
+N#define	VAR_SEC_PER_CLUS	0x38			/* 逻辑盘的每簇扇区数 */
+N#define	VAR_FILE_DIR_INDEX	0x3B			/* 当前文件目录信息在扇区内的索引号 */
+N#define	VAR_CLUS_SEC_OFS	0x3C			/* 当前文件指针在簇内的扇区偏移,为0xFF则指向文件末尾,簇结束 */
+N
+N/* 32位/4字节变量 */
+N#define	VAR_DISK_ROOT		0x44			/* 对于FAT16盘为根目录占用扇区数,对于FAT32盘为根目录起始簇号(总长度32位,低字节在前) */
+N#define	VAR_DSK_TOTAL_CLUS	0x48			/* 逻辑盘的总簇数(总长度32位,低字节在前) */
+N#define	VAR_DSK_START_LBA	0x4C			/* 逻辑盘的起始绝对扇区号LBA(总长度32位,低字节在前) */
+N#define	VAR_DSK_DAT_START	0x50			/* 逻辑盘的数据区域的起始LBA(总长度32位,低字节在前) */
+N#define	VAR_LBA_BUFFER		0x54			/* 当前磁盘数据缓冲区的数据对应的LBA(总长度32位,低字节在前) */
+N#define	VAR_LBA_CURRENT		0x58			/* 当前读写的磁盘起始LBA地址(总长度32位,低字节在前) */
+N#define	VAR_FAT_DIR_LBA		0x5C			/* 当前文件目录信息所在的扇区LBA地址(总长度32位,低字节在前) */
+N#define	VAR_START_CLUSTER	0x60			/* 当前文件或者目录(文件夹)的起始簇号(总长度32位,低字节在前) */
+N#define	VAR_CURRENT_CLUST	0x64			/* 当前文件的当前簇号(总长度32位,低字节在前) */
+N#define	VAR_FILE_SIZE		0x68			/* 当前文件的长度(总长度32位,低字节在前) */
+N#define	VAR_CURRENT_OFFSET	0x6C			/* 当前文件指针,当前读写位置的字节偏移(总长度32位,低字节在前) */
+N
+N#endif
+N
+N/* ********************************************************************************************************************* */
+N/* 常用USB定义 */
+N
+N/* USB的包标识PID, 主机方式可能用到 */
+N#ifndef	DEF_USB_PID_SETUP
+N#define	DEF_USB_PID_NULL	0x00			/* 保留PID, 未定义 */
+N#define	DEF_USB_PID_SOF		0x05
+N#define	DEF_USB_PID_SETUP	0x0D
+N#define	DEF_USB_PID_IN		0x09
+N#define	DEF_USB_PID_OUT		0x01
+N#define	DEF_USB_PID_ACK		0x02
+N#define	DEF_USB_PID_NAK		0x0A
+N#define	DEF_USB_PID_STALL	0x0E
+N#define	DEF_USB_PID_DATA0	0x03
+N#define	DEF_USB_PID_DATA1	0x0B
+N#define	DEF_USB_PID_PRE		0x0C
+N#endif
+N
+N/* USB请求类型, 外置固件模式可能用到 */
+N#ifndef	DEF_USB_REQ_TYPE
+N#define	DEF_USB_REQ_READ	0x80			/* 控制读操作 */
+N#define	DEF_USB_REQ_WRITE	0x00			/* 控制写操作 */
+N#define	DEF_USB_REQ_TYPE	0x60			/* 控制请求类型 */
+N#define	DEF_USB_REQ_STAND	0x00			/* 标准请求 */
+N#define	DEF_USB_REQ_CLASS	0x20			/* 设备类请求 */
+N#define	DEF_USB_REQ_VENDOR	0x40			/* 厂商请求 */
+N#define	DEF_USB_REQ_RESERVE	0x60			/* 保留请求 */
+N#endif
+N
+N/* USB标准设备请求, RequestType的位6位5=00(Standard), 外置固件模式可能用到 */
+N#ifndef	DEF_USB_GET_DESCR
+N#define	DEF_USB_CLR_FEATURE	0x01
+N#define	DEF_USB_SET_FEATURE	0x03
+N#define	DEF_USB_GET_STATUS	0x00
+N#define	DEF_USB_SET_ADDRESS	0x05
+N#define	DEF_USB_GET_DESCR	0x06
+N#define	DEF_USB_SET_DESCR	0x07
+N#define	DEF_USB_GET_CONFIG	0x08
+N#define	DEF_USB_SET_CONFIG	0x09
+N#define	DEF_USB_GET_INTERF	0x0A
+N#define	DEF_USB_SET_INTERF	0x0B
+N#define	DEF_USB_SYNC_FRAME	0x0C
+N#endif
+N
+N/* ********************************************************************************************************************* */
+N
+N#ifdef __cplusplus
+S}
+N#endif
+N
+N#endif
+L 5 "..\..\User\CH376\inc\HAL.H" 2
+N
+N#ifndef	__CH376_HAL_H__
+N#define __CH376_HAL_H__
+N
+N/* 附加的USB操作状态定义 */
+N#define		ERR_USB_UNKNOWN		0xFA	/* 未知错误,不应该发生的情况,需检查硬件或者程序错误 */
+N
+N/* 延时指定微秒时间,根据单片机主频调整,不精确 */
+Nvoid	mDelayuS( UINT8 us );
+N
+N/* 延时指定毫秒时间,根据单片机主频调整,不精确 */
+Nvoid	mDelaymS( UINT8 ms );
+N
+Nvoid	CH376_PORT_INIT( void );  		/* CH376通讯接口初始化 */
+N
+Nvoid	xEndCH376Cmd( void );			/* 结束CH376命令,仅用于SPI接口方式 */
+N
+Nvoid	xWriteCH376Cmd( UINT8 mCmd );	/* 向CH376写命令 */
+N
+Nvoid	xWriteCH376Data( UINT8 mData );	/* 向CH376写数据 */
+N
+NUINT8	xReadCH376Data( void );			/* 从CH376读数据 */
+N
+NUINT8	Query376Interrupt( void );		/* 查询CH376中断(INT#引脚为低电平) */
+N
+NUINT8	mInitCH376Host( void );			/* 初始化CH376 */
+N
+N#endif
+L 21 "..\..\User\CH376\inc\FILE_SYS.H" 2
+N
+N#define	STRUCT_OFFSET( s, m )	( (UINT8)( & ((s *)0) -> m ) )	/* 定义获取结构成员相对偏移地址的宏 */
+N
+N#ifdef	EN_LONG_NAME
+S#ifndef	LONG_NAME_BUF_LEN
+S#define	LONG_NAME_BUF_LEN	( LONG_NAME_PER_DIR * 20 )	/* 自行定义的长文件名缓冲区长度,最小值为LONG_NAME_PER_DIR*1 */
+S#endif
+N#endif
+N
+N
+NUINT8	CH376ReadBlock( PUINT8 buf );  /* 从当前主机端点的接收缓冲区读取数据块,返回长度 */
+N
+NUINT8	CH376WriteReqBlock( PUINT8 buf );  /* 向内部指定缓冲区写入请求的数据块,返回长度 */
+N
+Nvoid	CH376WriteHostBlock( PUINT8 buf, UINT8 len );  /* 向USB主机端点的发送缓冲区写入数据块 */
+N
+Nvoid	CH376WriteOfsBlock( PUINT8 buf, UINT8 ofs, UINT8 len );  /* 向内部缓冲区指定偏移地址写入数据块 */
+N
+Nvoid	CH376SetFileName( PUINT8 name );  /* 设置将要操作的文件的文件名 */
+N
+NUINT32	CH376Read32bitDat( void );  /* 从CH376芯片读取32位的数据并结束命令 */
+N
+NUINT8	CH376ReadVar8( UINT8 var );  /* 读CH376芯片内部的8位变量 */
+N
+Nvoid	CH376WriteVar8( UINT8 var, UINT8 dat );  /* 写CH376芯片内部的8位变量 */
+N
+NUINT32	CH376ReadVar32( UINT8 var );  /* 读CH376芯片内部的32位变量 */
+N
+Nvoid	CH376WriteVar32( UINT8 var, UINT32 dat );  /* 写CH376芯片内部的32位变量 */
+N
+Nvoid	CH376EndDirInfo( void );  /* 在调用CH376DirInfoRead获取FAT_DIR_INFO结构之后应该通知CH376结束 */
+N
+NUINT32	CH376GetFileSize( void );  /* 读取当前文件长度 */
+N
+NUINT8	CH376GetDiskStatus( void );  /* 获取磁盘和文件系统的工作状态 */
+N
+NUINT8	CH376GetIntStatus( void );  /* 获取中断状态并取消中断请求 */
+N
+N#ifndef	NO_DEFAULT_CH376_INT
+NUINT8	Wait376Interrupt( void );  /* 等待CH376中断(INT#低电平)，返回中断状态码, 超时则返回ERR_USB_UNKNOWN */
+N#endif
+N
+NUINT8	CH376SendCmdWaitInt( UINT8 mCmd );  /* 发出命令码后,等待中断 */
+N
+NUINT8	CH376SendCmdDatWaitInt( UINT8 mCmd, UINT8 mDat );  /* 发出命令码和一字节数据后,等待中断 */
+N
+NUINT8	CH376DiskReqSense( void );  /* 检查USB存储器错误 */
+N
+NUINT8	CH376DiskConnect( void );  /* 检查U盘是否连接,不支持SD卡 */
+N
+NUINT8	CH376DiskMount( void );  /* 初始化磁盘并测试磁盘是否就绪 */
+N
+NUINT8	CH376FileOpen( PUINT8 name );  /* 在根目录或者当前目录下打开文件或者目录(文件夹) */
+N
+NUINT8	CH376FileCreate( PUINT8 name );  /* 在根目录或者当前目录下新建文件,如果文件已经存在那么先删除 */
+N
+NUINT8	CH376DirCreate( PUINT8 name );  /* 在根目录下新建目录(文件夹)并打开,如果目录已经存在那么直接打开 */
+N
+NUINT8	CH376SeparatePath( PUINT8 path );  /* 从路径中分离出最后一级文件名或者目录(文件夹)名,返回最后一级文件名或者目录名的字节偏移 */
+N
+NUINT8	CH376FileOpenDir( PUINT8 PathName, UINT8 StopName );  /* 打开多级目录下的文件或者目录的上级目录,支持多级目录路径,支持路径分隔符,路径长度不超过255个字符 */
+N/* StopName 指向最后一级文件名或者目录名 */
+N
+NUINT8	CH376FileOpenPath( PUINT8 PathName );  /* 打开多级目录下的文件或者目录(文件夹),支持多级目录路径,支持路径分隔符,路径长度不超过255个字符 */
+N
+NUINT8	CH376FileCreatePath( PUINT8 PathName );  /* 新建多级目录下的文件,支持多级目录路径,支持路径分隔符,路径长度不超过255个字符 */
+N
+N#ifdef	EN_DIR_CREATE
+SUINT8	CH376DirCreatePath( PUINT8 PathName );  /* 新建多级目录下的目录(文件夹)并打开,支持多级目录路径,支持路径分隔符,路径长度不超过255个字符 */
+N#endif
+N
+NUINT8	CH376FileErase( PUINT8 PathName );  /* 删除文件,如果已经打开则直接删除,否则对于文件会先打开再删除,支持多级目录路径 */
+N
+NUINT8	CH376FileClose( UINT8 UpdateSz );  /* 关闭当前已经打开的文件或者目录(文件夹) */
+N
+NUINT8	CH376DirInfoRead( void );  /* 读取当前文件的目录信息 */
+N
+NUINT8	CH376DirInfoSave( void );  /* 保存文件的目录信息 */
+N
+NUINT8	CH376ByteLocate( UINT32 offset );  /* 以字节为单位移动当前文件指针 */
+N
+NUINT8	CH376ByteRead( PUINT8 buf, UINT16 ReqCount, PUINT16 RealCount );  /* 以字节为单位从当前位置读取数据块 */
+N
+NUINT8	CH376ByteWrite( PUINT8 buf, UINT16 ReqCount, PUINT16 RealCount );  /* 以字节为单位向当前位置写入数据块 */
+N
+N#ifdef	EN_DISK_QUERY
+S
+SUINT8	CH376DiskCapacity( PUINT32 DiskCap );  /* 查询磁盘物理容量,扇区数 */
+S
+SUINT8	CH376DiskQuery( PUINT32 DiskFre );  /* 查询磁盘剩余空间信息,扇区数 */
+S
+N#endif
+N
+NUINT8	CH376SecLocate( UINT32 offset );  /* 以扇区为单位移动当前文件指针 */
+N
+N#ifdef	EN_SECTOR_ACCESS
+S
+SUINT8	CH376DiskReadSec( PUINT8 buf, UINT32 iLbaStart, UINT8 iSectorCount );  /* 从U盘读取多个扇区的数据块到缓冲区,不支持SD卡 */
+S
+SUINT8	CH376DiskWriteSec( PUINT8 buf, UINT32 iLbaStart, UINT8 iSectorCount );  /* 将缓冲区中的多个扇区的数据块写入U盘,不支持SD卡 */
+S
+SUINT8	CH376SecRead( PUINT8 buf, UINT8 ReqCount, PUINT8 RealCount );  /* 以扇区为单位从当前位置读取数据块,不支持SD卡 */
+S
+SUINT8	CH376SecWrite( PUINT8 buf, UINT8 ReqCount, PUINT8 RealCount );  /* 以扇区为单位在当前位置写入数据块,不支持SD卡 */
+S
+N#endif
+N
+N#ifdef	EN_LONG_NAME
+S
+SUINT8	CH376LongNameWrite( PUINT8 buf, UINT16 ReqCount );  /* 长文件名专用的字节写子程序 */
+S
+SUINT8	CH376CheckNameSum( PUINT8 DirName );  /* 计算长文件名的短文件名检验和,输入为无小数点分隔符的固定11字节格式 */
+S
+SUINT8	CH376LocateInUpDir( PUINT8 PathName );  /* 在上级目录(文件夹)中移动文件指针到当前文件目录信息所在的扇区 */
+S/* 另外,顺便将当前文件目录信息所在的扇区的前一个扇区的LBA地址写入CH376内部VAR_FAT_DIR_LBA变量(为了方便收集长文件名时向前搜索,否则要多移动一次) */
+S/* 使用了全局缓冲区GlobalBuf的前12个字节 */
+S
+SUINT8	CH376GetLongName( PUINT8 PathName, PUINT8 LongName );  /* 由短文件名或者目录(文件夹)名获得相应的长文件名 */
+S/* 需要输入短文件名的完整路径PathName,需要提供缓冲区接收长文件名LongName(以UNICODE小端编码,以双0结束) */
+S/* 使用了全局缓冲区GlobalBuf的前34个字节,sizeof(GlobalBuf)>=sizeof(FAT_DIR_INFO)+2 */
+S
+SUINT8	CH376CreateLongName( PUINT8 PathName, PUINT8 LongName );  /* 新建具有长文件名的文件,关闭文件后返回,LongName输入路径必须在RAM中 */
+S/* 需要输入短文件名的完整路径PathName(请事先参考FAT规范由长文件名自行产生),需要输入以UNICODE小端编码的以双0结束的长文件名LongName */
+S/* 使用了全局缓冲区GlobalBuf的前64个字节,sizeof(GlobalBuf)>=sizeof(FAT_DIR_INFO)*2 */
+S
+N#endif
+N
+N#endif
+L 18 "..\..\User\CH376\src\FILE_SYS.C" 2
+N
+NUINT8	CH376ReadBlock( PUINT8 buf )  /* 从当前主机端点的接收缓冲区读取数据块,返回长度 */
+N{
+N	UINT8	s, l;
+N	xWriteCH376Cmd( CMD01_RD_USB_DATA0 );
+X	xWriteCH376Cmd( 0x27 );
+N	s = l = xReadCH376Data( );  /* 长度 */
+N	if ( l ) {
+N		do {
+N			*buf = xReadCH376Data( );
+N			buf ++;
+N		} while ( -- l );
+N	}
+N	xEndCH376Cmd( );
+N	return( s );
+N}
+N
+NUINT8	CH376WriteReqBlock( PUINT8 buf )  /* 向内部指定缓冲区写入请求的数据块,返回长度 */
+N{
+N	UINT8	s, l;
+N	xWriteCH376Cmd( CMD01_WR_REQ_DATA );
+X	xWriteCH376Cmd( 0x2D );
+N	s = l = xReadCH376Data( );  /* 长度 */
+N	if ( l ) {
+N		do {
+N			xWriteCH376Data( *buf );
+N			buf ++;
+N		} while ( -- l );
+N	}
+N	xEndCH376Cmd( );
+N	return( s );
+N}
+N
+Nvoid	CH376WriteHostBlock( PUINT8 buf, UINT8 len )  /* 向USB主机端点的发送缓冲区写入数据块 */
+N{
+N	xWriteCH376Cmd( CMD10_WR_HOST_DATA );
+X	xWriteCH376Cmd( 0x2C );
+N	xWriteCH376Data( len );  /* 长度 */
+N	if ( len ) {
+N		do {
+N			xWriteCH376Data( *buf );
+N			buf ++;
+N		} while ( -- len );
+N	}
+N	xEndCH376Cmd( );
+N}
+N
+Nvoid	CH376WriteOfsBlock( PUINT8 buf, UINT8 ofs, UINT8 len )  /* 向内部缓冲区指定偏移地址写入数据块 */
+N{
+N	xWriteCH376Cmd( CMD20_WR_OFS_DATA );
+X	xWriteCH376Cmd( 0x2E );
+N	xWriteCH376Data( ofs );  /* 偏移地址 */
+N	xWriteCH376Data( len );  /* 长度 */
+N	if ( len ) {
+N		do {
+N			xWriteCH376Data( *buf );
+N			buf ++;
+N		} while ( -- len );
+N	}
+N	xEndCH376Cmd( );
+N}
+N
+Nvoid	CH376SetFileName( PUINT8 name )  /* 设置将要操作的文件的文件名 */
+N{
+N/*	UINT8	i;*/
+N	UINT8	c;
+N	xWriteCH376Cmd( CMD10_SET_FILE_NAME );
+X	xWriteCH376Cmd( 0x2F );
+N/*	for ( i = MAX_FILE_NAME_LEN; i != 0; -- i ) {
+N		c = *name;
+N		xWriteCH376Data( c );
+N		if ( c == 0 ) break;
+N		name ++;
+N	}*/
+N	c = *name;
+N	xWriteCH376Data( c );
+N	while ( c ) {
+N		name ++;
+N		c = *name;
+N		if ( c == DEF_SEPAR_CHAR1 || c == DEF_SEPAR_CHAR2 ) c = 0;  /* 强行将文件名截止 */
+X		if ( c == 0x5C || c == 0x2F ) c = 0;   
+N		xWriteCH376Data( c );
+N	}
+N	xEndCH376Cmd( );
+N}
+N
+NUINT32	CH376Read32bitDat( void )  /* 从CH376芯片读取32位的数据并结束命令 */
+N{
+N	UINT8	c0, c1, c2, c3;
+N	c0 = xReadCH376Data( );
+N	c1 = xReadCH376Data( );
+N	c2 = xReadCH376Data( );
+N	c3 = xReadCH376Data( );
+N	xEndCH376Cmd( );
+N	return( c0 | (UINT16)c1 << 8 | (UINT32)c2 << 16 | (UINT32)c3 << 24 );
+N}
+N
+NUINT8	CH376ReadVar8( UINT8 var )  /* 读CH376芯片内部的8位变量 */
+N{
+N	UINT8	c0;
+N	xWriteCH376Cmd( CMD11_READ_VAR8 );
+X	xWriteCH376Cmd( 0x0A );
+N	xWriteCH376Data( var );
+N	c0 = xReadCH376Data( );
+N	xEndCH376Cmd( );
+N	return( c0 );
+N}
+N
+Nvoid	CH376WriteVar8( UINT8 var, UINT8 dat )  /* 写CH376芯片内部的8位变量 */
+N{
+N	xWriteCH376Cmd( CMD20_WRITE_VAR8 );
+X	xWriteCH376Cmd( 0x0B );
+N	xWriteCH376Data( var );
+N	xWriteCH376Data( dat );
+N	xEndCH376Cmd( );
+N}
+N
+NUINT32	CH376ReadVar32( UINT8 var )  /* 读CH376芯片内部的32位变量 */
+N{
+N	xWriteCH376Cmd( CMD14_READ_VAR32 );
+X	xWriteCH376Cmd( 0x0C );
+N	xWriteCH376Data( var );
+N	return( CH376Read32bitDat( ) );  /* 从CH376芯片读取32位的数据并结束命令 */
+N}
+N
+Nvoid	CH376WriteVar32( UINT8 var, UINT32 dat )  /* 写CH376芯片内部的32位变量 */
+N{
+N	xWriteCH376Cmd( CMD50_WRITE_VAR32 );
+X	xWriteCH376Cmd( 0x0D );
+N	xWriteCH376Data( var );
+N	xWriteCH376Data( (UINT8)dat );
+N	xWriteCH376Data( (UINT8)( (UINT16)dat >> 8 ) );
+N	xWriteCH376Data( (UINT8)( dat >> 16 ) );
+N	xWriteCH376Data( (UINT8)( dat >> 24 ) );
+N	xEndCH376Cmd( );
+N}
+N
+Nvoid	CH376EndDirInfo( void )  /* 在调用CH376DirInfoRead获取FAT_DIR_INFO结构之后应该通知CH376结束 */
+N{
+N	CH376WriteVar8( 0x0D, 0x00 );
+N}
+N
+NUINT32	CH376GetFileSize( void )  /* 读取当前文件长度 */
+N{
+N	return( CH376ReadVar32( VAR_FILE_SIZE ) );
+X	return( CH376ReadVar32( 0x68 ) );
+N}
+N
+NUINT8	CH376GetDiskStatus( void )  /* 获取磁盘和文件系统的工作状态 */
+N{
+N	return( CH376ReadVar8( VAR_DISK_STATUS ) );
+X	return( CH376ReadVar8( 0x2B ) );
+N}
+N
+NUINT8	CH376GetIntStatus( void )  /* 获取中断状态并取消中断请求 */
+N{
+N	UINT8	s;
+N	xWriteCH376Cmd( CMD01_GET_STATUS );
+X	xWriteCH376Cmd( 0x22 );
+N	s = xReadCH376Data( );
+N	xEndCH376Cmd( );
+N	return( s );
+N}
+N
+N#ifndef	NO_DEFAULT_CH376_INT
+NUINT8	Wait376Interrupt( void )  /* 等待CH376中断(INT#低电平)，返回中断状态码, 超时则返回ERR_USB_UNKNOWN */
+N{
+N#ifdef	DEF_INT_TIMEOUT
+S#if		DEF_INT_TIMEOUT < 1
+S	while ( Query376Interrupt( ) == FALSE );  /* 一直等中断 */
+S	return( CH376GetIntStatus( ) );  /* 检测到中断 */
+S#else
+S	UINT32	i;
+S	for ( i = 0; i < DEF_INT_TIMEOUT; i ++ ) {  /* 计数防止超时 */
+S		if ( Query376Interrupt( ) ) return( CH376GetIntStatus( ) );  /* 检测到中断 */
+S/* 在等待CH376中断的过程中,可以做些需要及时处理的其它事情 */
+S	}
+S	return( ERR_USB_UNKNOWN );  /* 不应该发生的情况 */
+S#endif
+N#else
+N	UINT32	i;
+N	for ( i = 0; i < 5000000; i ++ ) {  /* 计数防止超时,默认的超时时间,与单片机主频有关 */
+N		if ( Query376Interrupt( ) ) return( CH376GetIntStatus( ) );  /* 检测到中断 */
+N/* 在等待CH376中断的过程中,可以做些需要及时处理的其它事情 */
+N	}
+N	return( ERR_USB_UNKNOWN );  /* 不应该发生的情况 */
+X	return( 0xFA );   
+N#endif
+N}
+N#endif
+N
+NUINT8	CH376SendCmdWaitInt( UINT8 mCmd )  /* 发出命令码后,等待中断 */
+N{
+N	xWriteCH376Cmd( mCmd );
+N	xEndCH376Cmd( );
+N	return( Wait376Interrupt( ) );
+N}
+N
+NUINT8	CH376SendCmdDatWaitInt( UINT8 mCmd, UINT8 mDat )  /* 发出命令码和一字节数据后,等待中断 */
+N{
+N	xWriteCH376Cmd( mCmd );
+N	xWriteCH376Data( mDat );
+N	xEndCH376Cmd( );
+N	return( Wait376Interrupt( ) );
+N}
+N
+NUINT8	CH376DiskReqSense( void )  /* 检查USB存储器错误 */
+N{
+N	UINT8	s;
+N	mDelaymS( 5 );
+N	s = CH376SendCmdWaitInt( CMD0H_DISK_R_SENSE );
+X	s = CH376SendCmdWaitInt( 0x5A );
+N	mDelaymS( 5 );
+N	return( s );
+N}
+N
+NUINT8	CH376DiskConnect( void )  /* 检查U盘是否连接,不支持SD卡 */
+N{
+N	if ( Query376Interrupt( ) ) CH376GetIntStatus( );  /* 检测到中断 */
+N	return( CH376SendCmdWaitInt( CMD0H_DISK_CONNECT ) );
+X	return( CH376SendCmdWaitInt( 0x30 ) );
+N}
+N
+NUINT8	CH376DiskMount( void )  /* 初始化磁盘并测试磁盘是否就绪 */
+N{
+N	return( CH376SendCmdWaitInt( CMD0H_DISK_MOUNT ) );
+X	return( CH376SendCmdWaitInt( 0x31 ) );
+N}
+N
+NUINT8	CH376FileOpen( PUINT8 name )  /* 在根目录或者当前目录下打开文件或者目录(文件夹) */
+N{
+N	CH376SetFileName( name );  /* 设置将要操作的文件的文件名 */
+N	if ( name[0] == DEF_SEPAR_CHAR1 || name[0] == DEF_SEPAR_CHAR2 ) CH376WriteVar32( VAR_CURRENT_CLUST, 0 );
+X	if ( name[0] == 0x5C || name[0] == 0x2F ) CH376WriteVar32( 0x64, 0 );
+N	return( CH376SendCmdWaitInt( CMD0H_FILE_OPEN ) );
+X	return( CH376SendCmdWaitInt( 0x32 ) );
+N}
+N
+NUINT8	CH376FileCreate( PUINT8 name )  /* 在根目录或者当前目录下新建文件,如果文件已经存在那么先删除 */
+N{
+N	if ( name ) CH376SetFileName( name );  /* 设置将要操作的文件的文件名 */
+N	return( CH376SendCmdWaitInt( CMD0H_FILE_CREATE ) );
+X	return( CH376SendCmdWaitInt( 0x34 ) );
+N}
+N
+NUINT8	CH376DirCreate( PUINT8 name )  /* 在根目录下新建目录(文件夹)并打开,如果目录已经存在那么直接打开 */
+N{
+N	CH376SetFileName( name );  /* 设置将要操作的文件的文件名 */
+N	if ( name[0] == DEF_SEPAR_CHAR1 || name[0] == DEF_SEPAR_CHAR2 ) CH376WriteVar32( VAR_CURRENT_CLUST, 0 );
+X	if ( name[0] == 0x5C || name[0] == 0x2F ) CH376WriteVar32( 0x64, 0 );
+N	return( CH376SendCmdWaitInt( CMD0H_DIR_CREATE ) );
+X	return( CH376SendCmdWaitInt( 0x40 ) );
+N}
+N
+NUINT8	CH376SeparatePath( PUINT8 path )  /* 从路径中分离出最后一级文件名或者目录(文件夹)名,返回最后一级文件名或者目录名的字节偏移 */
+N{
+N	PUINT8	pName;
+N	for ( pName = path; *pName != 0; ++ pName );  /* 到文件名字符串结束位置 */
+N	while ( *pName != DEF_SEPAR_CHAR1 && *pName != DEF_SEPAR_CHAR2 && pName != path ) pName --;  /*  搜索倒数第一个路径分隔符 */
+X	while ( *pName != 0x5C && *pName != 0x2F && pName != path ) pName --;   
+N	if ( pName != path ) pName ++;  /* 找到了路径分隔符,则修改指向目标文件的最后一级文件名,跳过前面的多级目录名及路径分隔符 */
+N	return( pName - path );
+N}
+N
+NUINT8	CH376FileOpenDir( PUINT8 PathName, UINT8 StopName )  /* 打开多级目录下的文件或者目录的上级目录,支持多级目录路径,支持路径分隔符,路径长度不超过255个字符 */
+N/* StopName 指向最后一级文件名或者目录名 */
+N{
+N	UINT8	i, s;
+N	s = 0;
+N	i = 1;  /* 跳过有可能的根目录符 */
+N	while ( 1 ) {
+N		while ( PathName[i] != DEF_SEPAR_CHAR1 && PathName[i] != DEF_SEPAR_CHAR2 && PathName[i] != 0 ) ++ i;  /* 搜索下一个路径分隔符或者路径结束符 */
+X		while ( PathName[i] != 0x5C && PathName[i] != 0x2F && PathName[i] != 0 ) ++ i;   
+N		if ( PathName[i] ) i ++;  /* 找到了路径分隔符,修改指向目标文件的最后一级文件名 */
+N		else i = 0;  /* 路径结束 */
+N		s = CH376FileOpen( &PathName[s] );  /* 打开文件或者目录 */
+N		if ( i && i != StopName ) {  /* 路径尚未结束 */
+N			if ( s != ERR_OPEN_DIR ) {  /* 因为是逐级打开,尚未到路径结束,所以,如果不是成功打开了目录,那么说明有问题 */
+X			if ( s != 0x41 ) {   
+N				if ( s == USB_INT_SUCCESS ) return( ERR_FOUND_NAME );  /* 中间路径必须是目录名,如果是文件名则出错 */
+X				if ( s == 0x14 ) return( 0x43 );   
+N				else if ( s == ERR_MISS_FILE ) return( ERR_MISS_DIR );  /* 中间路径的某个子目录没有找到,可能是目录名称错误 */
+X				else if ( s == 0x42 ) return( 0xB3 );   
+N				else return( s );  /* 操作出错 */
+N			}
+N			s = i;  /* 从下一级目录开始继续 */
+N		}
+N		else return( s );  /* 路径结束,USB_INT_SUCCESS为成功打开文件,ERR_OPEN_DIR为成功打开目录(文件夹),其它为操作出错 */
+N	}
+N}
+N
+NUINT8	CH376FileOpenPath( PUINT8 PathName )  /* 打开多级目录下的文件或者目录(文件夹),支持多级目录路径,支持路径分隔符,路径长度不超过255个字符 */
+N{
+N	return( CH376FileOpenDir( PathName, 0xFF ) );
+N}
+N
+NUINT8	CH376FileCreatePath( PUINT8 PathName )  /* 新建多级目录下的文件,支持多级目录路径,支持路径分隔符,路径长度不超过255个字符 */
+N{
+N	UINT8	s;
+N	UINT8	Name;
+N	Name = CH376SeparatePath( PathName );  /* 从路径中分离出最后一级文件名,返回最后一级文件名的偏移 */
+N	if ( Name ) {  /* 是多级目录 */
+N		s = CH376FileOpenDir( PathName, Name );  /* 打开多级目录下的最后一级目录,即打开新建文件的上级目录 */
+N		if ( s != ERR_OPEN_DIR ) {  /* 因为是打开上级目录,所以,如果不是成功打开了目录,那么说明有问题 */
+X		if ( s != 0x41 ) {   
+N			if ( s == USB_INT_SUCCESS ) return( ERR_FOUND_NAME );  /* 中间路径必须是目录名,如果是文件名则出错 */
+X			if ( s == 0x14 ) return( 0x43 );   
+N			else if ( s == ERR_MISS_FILE ) return( ERR_MISS_DIR );  /* 中间路径的某个子目录没有找到,可能是目录名称错误 */
+X			else if ( s == 0x42 ) return( 0xB3 );   
+N			else return( s );  /* 操作出错 */
+N		}
+N	}
+N	return( CH376FileCreate( &PathName[Name] ) );  /* 在根目录或者当前目录下新建文件 */
+N}
+N
+N#ifdef	EN_DIR_CREATE
+SUINT8	CH376DirCreatePath( PUINT8 PathName )  /* 新建多级目录下的目录(文件夹)并打开,支持多级目录路径,支持路径分隔符,路径长度不超过255个字符 */
+S{
+S	UINT8	s;
+S	UINT8	Name;
+S	UINT8	ClustBuf[4];
+S	Name = CH376SeparatePath( PathName );  /* 从路径中分离出最后一级目录名,返回最后一级文件名的偏移 */
+S	if ( Name ) {  /* 是多级目录 */
+S		s = CH376FileOpenDir( PathName, Name );  /* 打开多级目录下的最后一级目录,即打开新建目录的上级目录 */
+S		if ( s != ERR_OPEN_DIR ) {  /* 因为是打开上级目录,所以,如果不是成功打开了目录,那么说明有问题 */
+S			if ( s == USB_INT_SUCCESS ) return( ERR_FOUND_NAME );  /* 中间路径必须是目录名,如果是文件名则出错 */
+S			else if ( s == ERR_MISS_FILE ) return( ERR_MISS_DIR );  /* 中间路径的某个子目录没有找到,可能是目录名称错误 */
+S			else return( s );  /* 操作出错 */
+S		}
+S		xWriteCH376Cmd( CMD14_READ_VAR32 );
+S		xWriteCH376Data( VAR_START_CLUSTER );  /* 上级目录的起始簇号 */
+S		for ( s = 0; s != 4; s ++ ) ClustBuf[ s ] = xReadCH376Data( );
+S		xEndCH376Cmd( );
+S		s = CH376DirCreate( &PathName[Name] );  /* 在当前目录下新建目录 */
+S		if ( s != USB_INT_SUCCESS ) return( s );
+S		s = CH376ByteLocate( sizeof(FAT_DIR_INFO) + STRUCT_OFFSET( FAT_DIR_INFO, DIR_FstClusHI ) );  /* 移动文件指针 */
+S		if ( s != USB_INT_SUCCESS ) return( s );
+S		s = CH376ByteWrite( &ClustBuf[2], 2, NULL );  /* 写入上级目录的起始簇号的高16位 */
+S		if ( s != USB_INT_SUCCESS ) return( s );
+S		s = CH376ByteLocate( sizeof(FAT_DIR_INFO) + STRUCT_OFFSET( FAT_DIR_INFO, DIR_FstClusLO ) );  /* 移动文件指针 */
+S		if ( s != USB_INT_SUCCESS ) return( s );
+S		s = CH376ByteWrite( ClustBuf, 2, NULL );  /* 写入上级目录的起始簇号的低16位 */
+S		if ( s != USB_INT_SUCCESS ) return( s );
+S		s = CH376ByteLocate( 0 );  /* 移动文件指针,恢复到目录头位置 */
+S		if ( s != USB_INT_SUCCESS ) return( s );
+S	}
+S	else {  /* 不是多级目录 */
+S		if ( PathName[0] == DEF_SEPAR_CHAR1 || PathName[0] == DEF_SEPAR_CHAR2 ) return( CH376DirCreate( PathName ) );  /* 在根目录下新建目录 */
+S		else return( ERR_MISS_DIR );  /* 必须提供完整路径才能实现在当前目录下新建目录 */
+S	}
+S}
+N#endif
+N
+NUINT8	CH376FileErase( PUINT8 PathName )  /* 删除文件,如果已经打开则直接删除,否则对于文件会先打开再删除,支持多级目录路径 */
+N{
+N	UINT8	s;
+N	if ( PathName ) {  /* 文件尚未打开 */
+N		for ( s = 1; PathName[s] != DEF_SEPAR_CHAR1 && PathName[s] != DEF_SEPAR_CHAR2 && PathName[s] != 0; ++ s );  /* 搜索下一个路径分隔符或者路径结束符 */
+X		for ( s = 1; PathName[s] != 0x5C && PathName[s] != 0x2F && PathName[s] != 0; ++ s );   
+N		if ( PathName[s] ) {  /* 有路径分隔符,是多级目录下的文件或者目录 */
+N			s = CH376FileOpenPath( PathName );  /* 打开多级目录下的文件或者目录 */
+N			if ( s != USB_INT_SUCCESS && s != ERR_OPEN_DIR ) return( s );  /* 操作出错 */
+X			if ( s != 0x14 && s != 0x41 ) return( s );   
+N		}
+N		else CH376SetFileName( PathName );  /* 没有路径分隔符,是根目录或者当前目录下的文件或者目录,设置将要操作的文件的文件名 */
+N	}
+N	return( CH376SendCmdWaitInt( CMD0H_FILE_ERASE ) );
+X	return( CH376SendCmdWaitInt( 0x35 ) );
+N}
+N
+NUINT8	CH376FileClose( UINT8 UpdateSz )  /* 关闭当前已经打开的文件或者目录(文件夹) */
+N{
+N	return( CH376SendCmdDatWaitInt( CMD1H_FILE_CLOSE, UpdateSz ) );
+X	return( CH376SendCmdDatWaitInt( 0x36, UpdateSz ) );
+N}
+N
+NUINT8	CH376DirInfoRead( void )  /* 读取当前文件的目录信息 */
+N{
+N	return( CH376SendCmdDatWaitInt( CMD1H_DIR_INFO_READ, 0xFF ) );
+X	return( CH376SendCmdDatWaitInt( 0x37, 0xFF ) );
+N}
+N
+NUINT8	CH376DirInfoSave( void )  /* 保存文件的目录信息 */
+N{
+N	return( CH376SendCmdWaitInt( CMD0H_DIR_INFO_SAVE ) );
+X	return( CH376SendCmdWaitInt( 0x38 ) );
+N}
+N
+NUINT8	CH376ByteLocate( UINT32 offset )  /* 以字节为单位移动当前文件指针 */
+N{
+N	xWriteCH376Cmd( CMD4H_BYTE_LOCATE );
+X	xWriteCH376Cmd( 0x39 );
+N	xWriteCH376Data( (UINT8)offset );
+N	xWriteCH376Data( (UINT8)((UINT16)offset>>8) );
+N	xWriteCH376Data( (UINT8)(offset>>16) );
+N	xWriteCH376Data( (UINT8)(offset>>24) );
+N	xEndCH376Cmd( );
+N	return( Wait376Interrupt( ) );
+N}
+N
+NUINT8	CH376ByteRead( PUINT8 buf, UINT16 ReqCount, PUINT16 RealCount )  /* 以字节为单位从当前位置读取数据块 */
+N{
+N	UINT8	s;
+N	xWriteCH376Cmd( CMD2H_BYTE_READ );
+X	xWriteCH376Cmd( 0x3A );
+N	xWriteCH376Data( (UINT8)ReqCount );
+N	xWriteCH376Data( (UINT8)(ReqCount>>8) );
+N	xEndCH376Cmd( );
+N	if ( RealCount ) *RealCount = 0;
+N	while ( 1 ) {
+N		s = Wait376Interrupt( );
+N		if ( s == USB_INT_DISK_READ ) {
+X		if ( s == 0x1D ) {
+N			s = CH376ReadBlock( buf );  /* 从当前主机端点的接收缓冲区读取数据块,返回长度 */
+N			xWriteCH376Cmd( CMD0H_BYTE_RD_GO );
+X			xWriteCH376Cmd( 0x3B );
+N			xEndCH376Cmd( );
+N			buf += s;
+N			if ( RealCount ) *RealCount += s;
+N		}
+N/*		else if ( s == USB_INT_SUCCESS ) return( s );*/  /* 结束 */
+N		else return( s );  /* 错误 */
+N	}
+N}
+N
+NUINT8	CH376ByteWrite( PUINT8 buf, UINT16 ReqCount, PUINT16 RealCount )  /* 以字节为单位向当前位置写入数据块 */
+N{
+N	UINT8	s;
+N	xWriteCH376Cmd( CMD2H_BYTE_WRITE );
+X	xWriteCH376Cmd( 0x3C );
+N	xWriteCH376Data( (UINT8)ReqCount );
+N	xWriteCH376Data( (UINT8)(ReqCount>>8) );
+N	xEndCH376Cmd( );
+N	if ( RealCount ) *RealCount = 0;
+N	while ( 1 ) {
+N		s = Wait376Interrupt( );
+N		if ( s == USB_INT_DISK_WRITE ) {
+X		if ( s == 0x1E ) {
+N			s = CH376WriteReqBlock( buf );  /* 向内部指定缓冲区写入请求的数据块,返回长度 */
+N			xWriteCH376Cmd( CMD0H_BYTE_WR_GO );
+X			xWriteCH376Cmd( 0x3D );
+N			xEndCH376Cmd( );
+N			buf += s;
+N			if ( RealCount ) *RealCount += s;
+N		}
+N/*		else if ( s == USB_INT_SUCCESS ) return( s );*/  /* 结束 */
+N		else return( s );  /* 错误 */
+N	}
+N}
+N
+N#ifdef	EN_DISK_QUERY
+S
+SUINT8	CH376DiskCapacity( PUINT32 DiskCap )  /* 查询磁盘物理容量,扇区数 */
+S{
+S	UINT8	s;
+S	s = CH376SendCmdWaitInt( CMD0H_DISK_CAPACITY );
+S	if ( s == USB_INT_SUCCESS ) {  /* 参考CH376INC.H文件中CH376_CMD_DATA结构的DiskCapacity */
+S		xWriteCH376Cmd( CMD01_RD_USB_DATA0 );
+S		xReadCH376Data( );  /* 长度总是sizeof(CH376_CMD_DATA.DiskCapacity) */
+S		*DiskCap = CH376Read32bitDat( );  /* CH376_CMD_DATA.DiskCapacity.mDiskSizeSec,从CH376芯片读取32位的数据并结束命令 */
+S	}
+S	else *DiskCap = 0;
+S	return( s );
+S}
+S
+SUINT8	CH376DiskQuery( PUINT32 DiskFre )  /* 查询磁盘剩余空间信息,扇区数 */
+S{
+S	UINT8	s;
+S	UINT8	c0, c1, c2, c3;
+S	s = CH376SendCmdWaitInt( CMD0H_DISK_QUERY );
+S	if ( s == USB_INT_SUCCESS ) {  /* 参考CH376INC.H文件中CH376_CMD_DATA结构的DiskQuery */
+S		xWriteCH376Cmd( CMD01_RD_USB_DATA0 );
+S		xReadCH376Data( );  /* 长度总是sizeof(CH376_CMD_DATA.DiskQuery) */
+S		xReadCH376Data( );  /* CH376_CMD_DATA.DiskQuery.mTotalSector */
+S		xReadCH376Data( );
+S		xReadCH376Data( );
+S		xReadCH376Data( );
+S		c0 = xReadCH376Data( );  /* CH376_CMD_DATA.DiskQuery.mFreeSector */
+S		c1 = xReadCH376Data( );
+S		c2 = xReadCH376Data( );
+S		c3 = xReadCH376Data( );
+S		*DiskFre = c0 | (UINT16)c1 << 8 | (UINT32)c2 << 16 | (UINT32)c3 << 24;
+S		xReadCH376Data( );  /* CH376_CMD_DATA.DiskQuery.mDiskFat */
+S		xEndCH376Cmd( );
+S	}
+S	else *DiskFre = 0;
+S	return( s );
+S}
+S
+N#endif
+N
+NUINT8	CH376SecLocate( UINT32 offset )  /* 以扇区为单位移动当前文件指针 */
+N{
+N	xWriteCH376Cmd( CMD4H_SEC_LOCATE );
+X	xWriteCH376Cmd( 0x4A );
+N	xWriteCH376Data( (UINT8)offset );
+N	xWriteCH376Data( (UINT8)((UINT16)offset>>8) );
+N	xWriteCH376Data( (UINT8)(offset>>16) );
+N	xWriteCH376Data( 0 );  /* 超出最大文件尺寸 */
+N	xEndCH376Cmd( );
+N	return( Wait376Interrupt( ) );
+N}
+N
+N#ifdef	EN_SECTOR_ACCESS
+S
+SUINT8	CH376DiskReadSec( PUINT8 buf, UINT32 iLbaStart, UINT8 iSectorCount )  /* 从U盘读取多个扇区的数据块到缓冲区,不支持SD卡 */
+S/* iLbaStart 是准备读取的线性起始扇区号, iSectorCount 是准备读取的扇区数 */
+S{
+S	UINT8	s, err;
+S	UINT16	mBlockCount;
+S	for ( err = 0; err != 3; ++ err ) {  /* 出错重试 */
+S		xWriteCH376Cmd( CMD5H_DISK_READ );  /* 从USB存储器读扇区 */
+S		xWriteCH376Data( (UINT8)iLbaStart );  /* LBA的最低8位 */
+S		xWriteCH376Data( (UINT8)( (UINT16)iLbaStart >> 8 ) );
+S		xWriteCH376Data( (UINT8)( iLbaStart >> 16 ) );
+S		xWriteCH376Data( (UINT8)( iLbaStart >> 24 ) );  /* LBA的最高8位 */
+S		xWriteCH376Data( iSectorCount );  /* 扇区数 */
+S		xEndCH376Cmd( );
+S		for ( mBlockCount = iSectorCount * DEF_SECTOR_SIZE / CH376_DAT_BLOCK_LEN; mBlockCount != 0; -- mBlockCount ) {  /* 数据块计数 */
+S			s = Wait376Interrupt( );  /* 等待中断并获取状态 */
+S			if ( s == USB_INT_DISK_READ ) {  /* USB存储器读数据块,请求数据读出 */
+S				s = CH376ReadBlock( buf );  /* 从当前主机端点的接收缓冲区读取数据块,返回长度 */
+S				xWriteCH376Cmd( CMD0H_DISK_RD_GO );  /* 继续执行USB存储器的读操作 */
+S				xEndCH376Cmd( );
+S				buf += s;
+S			}
+S			else break;  /* 返回错误状态 */
+S		}
+S		if ( mBlockCount == 0 ) {
+S			s = Wait376Interrupt( );  /* 等待中断并获取状态 */
+S			if ( s == USB_INT_SUCCESS ) return( USB_INT_SUCCESS );  /* 操作成功 */
+S		}
+S		if ( s == USB_INT_DISCONNECT ) return( s );  /* U盘被移除 */
+S		CH376DiskReqSense( );  /* 检查USB存储器错误 */
+S	}
+S	return( s );  /* 操作失败 */
+S}
+S
+SUINT8	CH376DiskWriteSec( PUINT8 buf, UINT32 iLbaStart, UINT8 iSectorCount )  /* 将缓冲区中的多个扇区的数据块写入U盘,不支持SD卡 */
+S/* iLbaStart 是写入的线起始性扇区号, iSectorCount 是写入的扇区数 */
+S{
+S	UINT8	s, err;
+S	UINT16	mBlockCount;
+S	for ( err = 0; err != 3; ++ err ) {  /* 出错重试 */
+S		xWriteCH376Cmd( CMD5H_DISK_WRITE );  /* 向USB存储器写扇区 */
+S		xWriteCH376Data( (UINT8)iLbaStart );  /* LBA的最低8位 */
+S		xWriteCH376Data( (UINT8)( (UINT16)iLbaStart >> 8 ) );
+S		xWriteCH376Data( (UINT8)( iLbaStart >> 16 ) );
+S		xWriteCH376Data( (UINT8)( iLbaStart >> 24 ) );  /* LBA的最高8位 */
+S		xWriteCH376Data( iSectorCount );  /* 扇区数 */
+S		xEndCH376Cmd( );
+S		for ( mBlockCount = iSectorCount * DEF_SECTOR_SIZE / CH376_DAT_BLOCK_LEN; mBlockCount != 0; -- mBlockCount ) {  /* 数据块计数 */
+S			s = Wait376Interrupt( );  /* 等待中断并获取状态 */
+S			if ( s == USB_INT_DISK_WRITE ) {  /* USB存储器写数据块,请求数据写入 */
+S				CH376WriteHostBlock( buf, CH376_DAT_BLOCK_LEN );  /* 向USB主机端点的发送缓冲区写入数据块 */
+S				xWriteCH376Cmd( CMD0H_DISK_WR_GO );  /* 继续执行USB存储器的写操作 */
+S				xEndCH376Cmd( );
+S				buf += CH376_DAT_BLOCK_LEN;
+S			}
+S			else break;  /* 返回错误状态 */
+S		}
+S		if ( mBlockCount == 0 ) {
+S			s = Wait376Interrupt( );  /* 等待中断并获取状态 */
+S			if ( s == USB_INT_SUCCESS ) return( USB_INT_SUCCESS );  /* 操作成功 */
+S		}
+S		if ( s == USB_INT_DISCONNECT ) return( s );  /* U盘被移除 */
+S		CH376DiskReqSense( );  /* 检查USB存储器错误 */
+S	}
+S	return( s );  /* 操作失败 */
+S}
+S
+SUINT8	CH376SecRead( PUINT8 buf, UINT8 ReqCount, PUINT8 RealCount )  /* 以扇区为单位从当前位置读取数据块,不支持SD卡 */
+S{
+S	UINT8	s;
+S	UINT8	cnt;
+S	UINT32	StaSec;
+S	UINT32	fsz, fofs;
+S	if ( RealCount ) *RealCount = 0;
+S	do {
+S		xWriteCH376Cmd( CMD01_GET_IC_VER );
+S		cnt = xReadCH376Data( );
+S		if ( cnt == 0x41 ) {
+S			xWriteCH376Cmd( CMD14_READ_VAR32 );
+S			xWriteCH376Data( VAR_FILE_SIZE );
+S			xReadCH376Data( );
+S			fsz = xReadCH376Data( );
+S			fsz |= (UINT16)(xReadCH376Data( )) << 8;
+S			cnt = xReadCH376Data( );
+S			fsz |= (UINT32)cnt << 16;
+S			xWriteCH376Cmd( CMD14_READ_VAR32 );
+S			xWriteCH376Data( VAR_CURRENT_OFFSET );
+S			xReadCH376Data( );
+S			fofs = xReadCH376Data( );
+S			fofs |= (UINT16)(xReadCH376Data( )) << 8;
+S			fofs |= (UINT32)(xReadCH376Data( )) << 16;
+S			if ( fsz >= fofs + 510 ) CH376WriteVar8( VAR_FILE_SIZE + 3, 0xFF );
+S			else cnt = 0xFF;
+S		}
+S		else cnt = 0xFF;
+S		xWriteCH376Cmd( CMD1H_SEC_READ );
+S		xWriteCH376Data( ReqCount );
+S		xEndCH376Cmd( );
+S		s = Wait376Interrupt( );
+S		if ( cnt != 0xFF ) CH376WriteVar8( VAR_FILE_SIZE + 3, cnt );
+S		if ( s != USB_INT_SUCCESS ) return( s );
+S		xWriteCH376Cmd( CMD01_RD_USB_DATA0 );
+S		xReadCH376Data( );  /* 长度总是sizeof(CH376_CMD_DATA.SectorRead) */
+S		cnt = xReadCH376Data( );  /* CH376_CMD_DATA.SectorRead.mSectorCount */
+S		xReadCH376Data( );
+S		xReadCH376Data( );
+S		xReadCH376Data( );
+S		StaSec = CH376Read32bitDat( );  /* CH376_CMD_DATA.SectorRead.mStartSector,从CH376芯片读取32位的数据并结束命令 */
+S		if ( cnt == 0 ) break;
+S		s = CH376DiskReadSec( buf, StaSec, cnt );  /* 从U盘读取多个扇区的数据块到缓冲区 */
+S		if ( s != USB_INT_SUCCESS ) return( s );
+S		buf += cnt * DEF_SECTOR_SIZE;
+S		if ( RealCount ) *RealCount += cnt;
+S		ReqCount -= cnt;
+S	} while ( ReqCount );
+S	return( s );
+S}
+S
+SUINT8	CH376SecWrite( PUINT8 buf, UINT8 ReqCount, PUINT8 RealCount )  /* 以扇区为单位在当前位置写入数据块,不支持SD卡 */
+S{
+S	UINT8	s;
+S	UINT8	cnt;
+S	UINT32	StaSec;
+S	if ( RealCount ) *RealCount = 0;
+S	do {
+S		xWriteCH376Cmd( CMD1H_SEC_WRITE );
+S		xWriteCH376Data( ReqCount );
+S		xEndCH376Cmd( );
+S		s = Wait376Interrupt( );
+S		if ( s != USB_INT_SUCCESS ) return( s );
+S		xWriteCH376Cmd( CMD01_RD_USB_DATA0 );
+S		xReadCH376Data( );  /* 长度总是sizeof(CH376_CMD_DATA.SectorWrite) */
+S		cnt = xReadCH376Data( );  /* CH376_CMD_DATA.SectorWrite.mSectorCount */
+S		xReadCH376Data( );
+S		xReadCH376Data( );
+S		xReadCH376Data( );
+S		StaSec = CH376Read32bitDat( );  /* CH376_CMD_DATA.SectorWrite.mStartSector,从CH376芯片读取32位的数据并结束命令 */
+S		if ( cnt == 0 ) break;
+S		s = CH376DiskWriteSec( buf, StaSec, cnt );  /* 将缓冲区中的多个扇区的数据块写入U盘 */
+S		if ( s != USB_INT_SUCCESS ) return( s );
+S		buf += cnt * DEF_SECTOR_SIZE;
+S		if ( RealCount ) *RealCount += cnt;
+S		ReqCount -= cnt;
+S	} while ( ReqCount );
+S	return( s );
+S}
+S
+N#endif
+N
+N#ifdef	EN_LONG_NAME
+S
+SUINT8	CH376LongNameWrite( PUINT8 buf, UINT16 ReqCount )  /* 长文件名专用的字节写子程序 */
+S{
+S	UINT8	s, c;
+S	c = CH376ReadVar8( VAR_DISK_STATUS );
+S	if ( c == DEF_DISK_OPEN_ROOT ) CH376WriteVar8( VAR_DISK_STATUS, DEF_DISK_OPEN_DIR );
+S	xWriteCH376Cmd( CMD2H_BYTE_WRITE );
+S	xWriteCH376Data( (UINT8)ReqCount );
+S	xWriteCH376Data( (UINT8)(ReqCount>>8) );
+S	xEndCH376Cmd( );
+S	while ( 1 ) {
+S		s = Wait376Interrupt( );
+S		if ( s == USB_INT_DISK_WRITE ) {
+S			if ( buf ) buf += CH376WriteReqBlock( buf );  /* 向内部指定缓冲区写入请求的数据块,返回长度 */
+S			else {
+S				xWriteCH376Cmd( CMD01_WR_REQ_DATA );  /* 向内部指定缓冲区写入请求的数据块 */
+S				s = xReadCH376Data( );  /* 长度 */
+S				while ( s -- ) xWriteCH376Data( 0 );  /* 填充0 */
+S			}
+S			xWriteCH376Cmd( CMD0H_BYTE_WR_GO );
+S			xEndCH376Cmd( );
+S		}
+S/*		else if ( s == USB_INT_SUCCESS ) return( s );*/  /* 结束 */
+S		else {
+S			if ( c == DEF_DISK_OPEN_ROOT ) CH376WriteVar8( VAR_DISK_STATUS, c );
+S			return( s );  /* 错误 */
+S		}
+S	}
+S}
+S
+SUINT8	CH376CheckNameSum( PUINT8 DirName )  /* 计算长文件名的短文件名检验和,输入为无小数点分隔符的固定11字节格式 */
+S{
+S	UINT8	NameLen;
+S	UINT8	CheckSum;
+S	CheckSum = 0;
+S	for ( NameLen = 0; NameLen != 11; NameLen ++ ) CheckSum = ( CheckSum & 1 ? 0x80 : 0x00 ) + ( CheckSum >> 1 ) + *DirName++;
+S	return( CheckSum );
+S}
+S
+SUINT8	CH376LocateInUpDir( PUINT8 PathName )  /* 在上级目录(文件夹)中移动文件指针到当前文件目录信息所在的扇区 */
+S/* 另外,顺便将当前文件目录信息所在的扇区的前一个扇区的LBA地址写入CH376内部VAR_FAT_DIR_LBA变量(为了方便收集长文件名时向前搜索,否则要多移动一次) */
+S/* 使用了全局缓冲区GlobalBuf的前12个字节 */
+S{
+S	UINT8	s;
+S	xWriteCH376Cmd( CMD14_READ_VAR32 );
+S	xWriteCH376Data( VAR_FAT_DIR_LBA );  /* 当前文件目录信息所在的扇区LBA地址 */
+S	for ( s = 4; s != 8; s ++ ) GlobalBuf[ s ] = xReadCH376Data( );  /* 临时保存于全局缓冲区中,节约RAM */
+S	xEndCH376Cmd( );
+S	s = CH376SeparatePath( PathName );  /* 从路径中分离出最后一级文件名或者目录名,返回最后一级文件名或者目录名的偏移 */
+S	if ( s ) s = CH376FileOpenDir( PathName, s );  /* 是多级目录,打开多级目录下的最后一级目录,即打开文件的上级目录 */
+S	else s = CH376FileOpen( "/" );  /* 根目录下的文件,则打开根目录 */
+S	if ( s != ERR_OPEN_DIR ) return( s );
+S	*(PUINT32)(&GlobalBuf[0]) = 0;  /* 目录扇区偏移扇区数,保存在全局缓冲区中,节约RAM */
+S	while ( 1 ) {  /* 不断移动文件指针,直到与当前文件目录信息所在的扇区LBA地址匹配 */
+S		s = CH376SecLocate( *(PUINT32)(&GlobalBuf[0]) );  /* 以扇区为单位在上级目录中移动文件指针 */
+S		if ( s != USB_INT_SUCCESS ) return( s );
+S		CH376ReadBlock( &GlobalBuf[8] );  /* 从内存缓冲区读取CH376_CMD_DATA.SectorLocate.mSectorLba数据块,返回长度总是sizeof(CH376_CMD_DATA.SectorLocate) */
+S		if ( *(PUINT32)(&GlobalBuf[8]) == *(PUINT32)(&GlobalBuf[4]) ) return( USB_INT_SUCCESS );  /* 已到当前文件目录信息扇区 */
+S		xWriteCH376Cmd( CMD50_WRITE_VAR32 );
+S		xWriteCH376Data( VAR_FAT_DIR_LBA );  /* 得到前一个扇区,设置为新的文件目录信息扇区LBA地址 */
+S		for ( s = 8; s != 12; s ++ ) xWriteCH376Data( GlobalBuf[ s ] );
+S		xEndCH376Cmd( );
+S		++ *(PUINT32)(&GlobalBuf[0]);
+S	}
+S}
+S
+SUINT8	CH376GetLongName( PUINT8 PathName, PUINT8 LongName )  /* 由短文件名或者目录(文件夹)名获得相应的长文件名 */
+S/* 需要输入短文件名的完整路径PathName,需要提供缓冲区接收长文件名LongName(以UNICODE小端编码,以双0结束) */
+S/* 使用了全局缓冲区GlobalBuf的前34个字节,sizeof(GlobalBuf)>=sizeof(FAT_DIR_INFO)+2 */
+S{
+S	UINT8	s;
+S	UINT16	NameCount;	/* 长文件名字节计数 */
+S	s = CH376FileOpenPath( PathName );  /* 打开多级目录下的文件或者目录 */
+S	if ( s != USB_INT_SUCCESS && s != ERR_OPEN_DIR ) return( s );
+S	s = CH376DirInfoRead( );  /* 读取当前文件的目录信息FAT_DIR_INFO,将相关数据调到内存中 */
+S	if ( s != USB_INT_SUCCESS ) return( s );
+S	CH376ReadBlock( GlobalBuf );  /* 从内存缓冲区读取FAT_DIR_INFO数据块,返回长度总是sizeof(FAT_DIR_INFO) */
+S	CH376EndDirInfo( );  /* 获取完FAT_DIR_INFO结构 */
+S	GlobalBuf[32] = CH376CheckNameSum( GlobalBuf );  /* 计算长文件名的短文件名检验和,保存在全局缓冲区中,节约RAM */
+S	GlobalBuf[33] = CH376ReadVar8( VAR_FILE_DIR_INDEX );  /* 当前文件目录信息在扇区内的索引号,保存在全局缓冲区中,节约RAM */
+S	NameCount = 0;
+S	while ( 1 ) {
+S		if ( GlobalBuf[33] == 0 ) {  /* 当前的文件目录信息扇区处理结束,转到前一个扇区 */
+S			s = CH376LocateInUpDir( PathName );  /* 在上级目录中移动文件指针到当前文件目录信息所在的扇区 */
+S			if ( s != USB_INT_SUCCESS ) break;
+S			if ( CH376ReadVar32( VAR_CURRENT_OFFSET ) == 0 ) {  /* 当前已经处于目录扇区的开始,无法获取长文件名 */
+S				s = ERR_LONG_NAME_ERR;
+S				break;
+S			}
+S			GlobalBuf[33] = DEF_SECTOR_SIZE / sizeof( FAT_DIR_INFO );  /* 指向前一个扇区的最后一个文件目录信息 */
+S		}
+S		GlobalBuf[33] --;  /* 从后向前搜索文件目录信息 */
+S		s = CH376SendCmdDatWaitInt( CMD1H_DIR_INFO_READ, GlobalBuf[33] );  /* 读取指定的目录信息FAT_DIR_INFO,将相关数据调到内存中 */
+S		if ( s != USB_INT_SUCCESS ) break;
+S		CH376ReadBlock( GlobalBuf );  /* 从内存缓冲区读取FAT_DIR_INFO数据块,返回长度总是sizeof(FAT_DIR_INFO) */
+S		CH376EndDirInfo( );  /* 获取完FAT_DIR_INFO结构 */
+S		if ( ( GlobalBuf[11] & ATTR_LONG_NAME_MASK ) != ATTR_LONG_NAME || GlobalBuf[13] != GlobalBuf[32] ) {  /* 类型错误或者校验和错误 */
+S			s = ERR_LONG_NAME_ERR;
+S			break;  /* 没有直接返回是因为如果是打开了根目录那么必须要关闭后才能返回 */
+S		}
+S		for ( s = 1; s < sizeof( FAT_DIR_INFO ); s += 2 ) {  /* 收集长文件名,长文件名的字符在磁盘上UNICODE用小端方式存放 */
+S			if ( s == 1 + 5 * 2 ) s = 14;  /* 从长文件名的第一组1-5个字符跳到第二组6-11个字符 */
+S			else if ( s == 14 + 6 * 2 ) s = 28;  /* 从长文件名的第二组6-11个字符跳到第三组12-13个字符 */
+S			LongName[ NameCount++ ] = GlobalBuf[ s ];
+S			LongName[ NameCount++ ] = GlobalBuf[ s + 1 ];
+S			if ( GlobalBuf[ s ] == 0 && GlobalBuf[ s + 1 ] == 0 ) break;  /* 长文件名结束 */
+S			if ( NameCount >= LONG_NAME_BUF_LEN ) {  /* 长文件名缓冲区溢出 */
+S				s = ERR_LONG_BUF_OVER;
+S				goto CH376GetLongNameE;
+S			}
+S		}
+S		if ( GlobalBuf[0] & 0x40 ) {  /* 长文件名目录信息块结束 */
+S			if ( s >= sizeof( FAT_DIR_INFO ) ) *(PUINT16)( &LongName[ NameCount ] ) = 0x0000;  /* 尚未收集到长文件名的结束符,则强制结束 */
+S			s = USB_INT_SUCCESS;  /* 成功完成长文件名收集完成 */
+S			break;
+S		}
+S	}
+SCH376GetLongNameE:
+S	CH376FileClose( FALSE );  /* 对于根目录则必须要关闭 */
+S	return( s );
+S}
+S
+SUINT8	CH376CreateLongName( PUINT8 PathName, PUINT8 LongName )  /* 新建具有长文件名的文件,关闭文件后返回,LongName输入路径必须在RAM中 */
+S/* 需要输入短文件名的完整路径PathName(请事先参考FAT规范由长文件名自行产生),需要输入以UNICODE小端编码的以双0结束的长文件名LongName */
+S/* 使用了全局缓冲区GlobalBuf的前64个字节,sizeof(GlobalBuf)>=sizeof(FAT_DIR_INFO)*2 */
+S{
+S	UINT8	s, i;
+S	UINT8	DirBlockCnt;	/* 长文件名占用文件目录结构的个数 */
+S	UINT16	count;			/* 临时变量,用于计数,用于字节读文件方式下实际读取的字节数 */
+S	UINT16	NameCount;		/* 长文件名字节计数 */
+S	UINT32	NewFileLoc;		/* 当前文件目录信息在上级目录中的起始位置,偏移地址 */
+S	for ( count = 0; count < LONG_NAME_BUF_LEN; count += 2 ) if ( *(PUINT16)(&LongName[count]) == 0 ) break;  /* 到结束位置 */
+S	if ( count == 0 || count >= LONG_NAME_BUF_LEN || count > LONE_NAME_MAX_CHAR ) return( ERR_LONG_NAME_ERR );  /* 长文件名无效 */
+S	DirBlockCnt = count / LONG_NAME_PER_DIR;  /* 长文件名占用文件目录结构的个数 */
+S	i = count - DirBlockCnt * LONG_NAME_PER_DIR;
+S	if ( i ) {  /* 有零头 */
+S		if ( ++ DirBlockCnt * LONG_NAME_PER_DIR > LONG_NAME_BUF_LEN ) return( ERR_LONG_BUF_OVER );  /* 缓冲区溢出 */
+S		count += 2;  /* 加上0结束符后的长度 */
+S		i += 2;
+S		if ( i < LONG_NAME_PER_DIR ) {  /* 最末的文件目录结构不满 */
+S			while ( i++ < LONG_NAME_PER_DIR ) LongName[count++] = 0xFF;  /* 把剩余数据填为0xFF */
+S		}
+S	}
+S	s = CH376FileOpenPath( PathName );  /* 打开多级目录下的文件 */
+S	if ( s == USB_INT_SUCCESS ) {   /* 短文件名存在则返回错误 */
+S		s = ERR_NAME_EXIST;
+S		goto CH376CreateLongNameE;
+S	}
+S	if ( s != ERR_MISS_FILE ) return( s );
+S	s = CH376FileCreatePath( PathName );  /* 新建多级目录下的文件 */
+S	if ( s != USB_INT_SUCCESS ) return( s );
+S	i = CH376ReadVar8( VAR_FILE_DIR_INDEX );  /* 临时用于保存当前文件目录信息在扇区内的索引号 */
+S	s = CH376LocateInUpDir( PathName );  /* 在上级目录中移动文件指针到当前文件目录信息所在的扇区 */
+S	if ( s != USB_INT_SUCCESS ) goto CH376CreateLongNameE;  /* 没有直接返回是因为如果是打开了根目录那么必须要关闭后才能返回 */
+S	NewFileLoc = CH376ReadVar32( VAR_CURRENT_OFFSET ) + i * sizeof(FAT_DIR_INFO);  /* 计算当前文件目录信息在上级目录中的起始位置,偏移地址 */
+S	s = CH376ByteLocate( NewFileLoc );  /* 在上级目录中移动文件指针到当前文件目录信息的位置 */
+S	if ( s != USB_INT_SUCCESS ) goto CH376CreateLongNameE;
+S	s = CH376ByteRead( &GlobalBuf[ sizeof(FAT_DIR_INFO) ], sizeof(FAT_DIR_INFO), NULL );  /* 以字节为单位读取数据,获得当前文件的目录信息FAT_DIR_INFO */
+S	if ( s != USB_INT_SUCCESS ) goto CH376CreateLongNameE;
+S	for ( i = DirBlockCnt; i != 0; -- i ) {  /* 搜索空闲的文件目录结构用于存放长文件名 */
+S		s = CH376ByteRead( GlobalBuf, sizeof(FAT_DIR_INFO), &count );  /* 以字节为单位读取数据,获得下一个文件目录信息FAT_DIR_INFO */
+S		if ( s != USB_INT_SUCCESS ) goto CH376CreateLongNameE;
+S		if ( count == 0 ) break;  /* 无法读出数据,上级目录结束了 */
+S		if ( GlobalBuf[0] && GlobalBuf[0] != 0xE5 ) {  /* 后面有正在使用的文件目录结构,由于长文件名必须连接存放,所以空间不够,必须放弃当前位置并向后转移 */
+S			s = CH376ByteLocate( NewFileLoc );  /* 在上级目录中移动文件指针到当前文件目录信息的位置 */
+S			if ( s != USB_INT_SUCCESS ) goto CH376CreateLongNameE;
+S			GlobalBuf[ 0 ] = 0xE5;  /* 文件删除标志 */
+S			for ( s = 1; s != sizeof(FAT_DIR_INFO); s ++ ) GlobalBuf[ s ] = GlobalBuf[ sizeof(FAT_DIR_INFO) + s ];
+S			s = CH376LongNameWrite( GlobalBuf, sizeof(FAT_DIR_INFO) );  /* 写入一个文件目录结构,用于删除之前新建的文件,实际上稍后会将之转移到目录的最末位置 */
+S			if ( s != USB_INT_SUCCESS ) goto CH376CreateLongNameE;
+S			do {  /* 向后搜索空闲的文件目录结构 */
+S				s = CH376ByteRead( GlobalBuf, sizeof(FAT_DIR_INFO), &count );  /* 以字节为单位读取数据,获得下一个文件目录信息FAT_DIR_INFO */
+S				if ( s != USB_INT_SUCCESS ) goto CH376CreateLongNameE;
+S			} while ( count && GlobalBuf[0] );  /* 如果仍然是正在使用的文件目录结构则继续向后搜索,直到上级目录结束或者有尚未使用过的文件目录结构 */
+S			NewFileLoc = CH376ReadVar32( VAR_CURRENT_OFFSET );  /* 用上级目录的当前文件指针作为当前文件目录信息在上级目录中的起始位置 */
+S			i = DirBlockCnt + 1;  /* 需要的空闲的文件目录结构的个数,包括短文件名本身一个和长文件名 */
+S			if ( count == 0 ) break;  /* 无法读出数据,上级目录结束了 */
+S			NewFileLoc -= sizeof(FAT_DIR_INFO);  /* 倒回到刚才搜索到的空闲的文件目录结构的起始位置 */
+S		}
+S	}
+S	if ( i ) {  /* 空闲的文件目录结构不足以存放长文件名,原因是上级目录结束了,下面增加上级目录的长度 */
+S		s = CH376ReadVar8( VAR_SEC_PER_CLUS );  /* 每簇扇区数 */
+S		if ( s == 128 ) {  /* FAT12/FAT16的根目录,容量是固定的,无法增加文件目录结构 */
+S			s = ERR_FDT_OVER;  /* FAT12/FAT16根目录下的文件数应该少于512个,需要磁盘整理 */
+S			goto CH376CreateLongNameE;
+S		}
+S		count = s * DEF_SECTOR_SIZE;  /* 每簇字节数 */
+S		if ( count < i * sizeof(FAT_DIR_INFO) ) count <<= 1;  /* 一簇不够则增加一簇,这种情况只会发生于每簇为512字节的情况下 */
+S		s = CH376LongNameWrite( NULL, count );  /* 以字节为单位向当前位置写入全0数据块,清空新增加的文件目录簇 */
+S		if ( s != USB_INT_SUCCESS ) goto CH376CreateLongNameE;
+S	}
+S	s = CH376ByteLocate( NewFileLoc );  /* 在上级目录中移动文件指针到当前文件目录信息的位置 */
+S	if ( s != USB_INT_SUCCESS ) goto CH376CreateLongNameE;
+S	GlobalBuf[11] = ATTR_LONG_NAME;
+S	GlobalBuf[12] = 0x00;
+S	GlobalBuf[13] = CH376CheckNameSum( &GlobalBuf[ sizeof(FAT_DIR_INFO) ] );  /* 计算长文件名的短文件名检验和 */
+S	GlobalBuf[26] = 0x00;
+S	GlobalBuf[27] = 0x00;
+S	for ( s = 0; DirBlockCnt != 0; ) {  /* 长文件名占用的文件目录结构计数 */
+S		GlobalBuf[0] = s ? DirBlockCnt : DirBlockCnt | 0x40;  /* 首次要置长文件名入口标志 */
+S		DirBlockCnt --;
+S		NameCount = DirBlockCnt * LONG_NAME_PER_DIR;
+S		for ( s = 1; s < sizeof( FAT_DIR_INFO ); s += 2 ) {  /* 输出长文件名,长文件名的字符在磁盘上UNICODE用小端方式存放 */
+S			if ( s == 1 + 5 * 2 ) s = 14;  /* 从长文件名的第一组1-5个字符跳到第二组6-11个字符 */
+S			else if ( s == 14 + 6 * 2 ) s = 28;  /* 从长文件名的第二组6-11个字符跳到第三组12-13个字符 */
+S			GlobalBuf[ s ] = LongName[ NameCount++ ];
+S			GlobalBuf[ s + 1 ] = LongName[ NameCount++ ];
+S		}
+S		s = CH376LongNameWrite( GlobalBuf, sizeof(FAT_DIR_INFO) );  /* 以字节为单位写入一个文件目录结构,长文件名 */
+S		if ( s != USB_INT_SUCCESS ) goto CH376CreateLongNameE;
+S	}
+S	s = CH376LongNameWrite( &GlobalBuf[ sizeof(FAT_DIR_INFO) ], sizeof(FAT_DIR_INFO) );  /* 以字节为单位写入一个文件目录结构,这是转移来的之前新建的文件的目录信息 */
+SCH376CreateLongNameE:
+S	CH376FileClose( FALSE );  /* 对于根目录则必须要关闭 */
+S	return( s );
+S}
+S
+N#endif

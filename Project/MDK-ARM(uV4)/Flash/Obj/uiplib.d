@@ -1,0 +1,15 @@
+.\flash\obj\uiplib.o: ..\..\User\uIP\uip\uiplib.c
+.\flash\obj\uiplib.o: ..\..\User\uIP\uip\uip.h
+.\flash\obj\uiplib.o: ..\..\User\uIP\uip\uipopt.h
+.\flash\obj\uiplib.o: ..\..\User\uIP\dm9000\uip-conf.h
+.\flash\obj\uiplib.o: D:\Keil\ARM\ARMCC\Bin\..\include\inttypes.h
+.\flash\obj\uiplib.o: D:\Keil\ARM\ARMCC\Bin\..\include\stdint.h
+.\flash\obj\uiplib.o: ..\..\User\uIP\http\webserver.h
+.\flash\obj\uiplib.o: ..\..\User\uIP\http\httpd.h
+.\flash\obj\uiplib.o: ..\..\User\uIP\uip\psock.h
+.\flash\obj\uiplib.o: ..\..\User\uIP\uip\uipopt.h
+.\flash\obj\uiplib.o: ..\..\User\uIP\uip\pt.h
+.\flash\obj\uiplib.o: ..\..\User\uIP\uip\lc.h
+.\flash\obj\uiplib.o: ..\..\User\uIP\uip\lc-switch.h
+.\flash\obj\uiplib.o: ..\..\User\uIP\http\httpd-fs.h
+.\flash\obj\uiplib.o: ..\..\User\uIP\uip\uiplib.h
